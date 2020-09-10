@@ -21,16 +21,9 @@ impl HeimdallrClient
         let client_info = ClientInfoPkt::new(job.clone(), size);
         client_info.send(&stream);
 
-        let mut reply: String = String::new();
+        let daemon_reply = DaemonReplyPkt::receive(&stream);
 
-        // TODO make nicer
-        let mut de = serde_json::Deserializer::from_reader(stream);
-        let reply = DaemonReplyPkt::deserialize(&mut de).unwrap();
-
-        let id: u32 = reply.id;
-        
-
-        Ok(HeimdallrClient {job, size, id})
+        Ok(HeimdallrClient {job, size, id:daemon_reply.id})
     }
 }
 
@@ -52,7 +45,6 @@ impl ClientInfoPkt
     {
         let msg = serde_json::to_string(&self).unwrap();
         stream.write(msg.as_bytes());
-        println!("SENT");
     }
 
     pub fn receive(mut stream: &TcpStream) -> ClientInfoPkt
@@ -69,6 +61,28 @@ impl ClientInfoPkt
 pub struct DaemonReplyPkt
 {
     pub id: u32,
+}
+
+impl DaemonReplyPkt
+{
+    pub fn new(id: u32) -> DaemonReplyPkt
+    {
+        DaemonReplyPkt{id}
+    }
+
+    pub fn send(&self, mut stream: &TcpStream)
+    {
+        let msg = serde_json::to_string(&self).unwrap();
+        stream.write(msg.as_bytes());
+    }
+
+    pub fn receive(mut stream: &TcpStream) -> DaemonReplyPkt
+    {
+        let mut de = serde_json::Deserializer::from_reader(stream);
+        let daemon_reply = DaemonReplyPkt::deserialize(&mut de).unwrap();
+
+        daemon_reply
+    }
 }
 
 fn connect(addr: SocketAddrV4) -> TcpStream

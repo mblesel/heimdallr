@@ -43,9 +43,8 @@ impl Daemon
             {
                 // TODO make nicer
                 println!("{} : {}", idx, stream.peer_addr().unwrap());
-                let reply = DaemonReplyPkt{id:idx as u32};
-                let msg = serde_json::to_string(&reply).unwrap();
-                stream.write(msg.as_bytes());
+                let reply = DaemonReplyPkt::new(idx as u32);
+                reply.send(&stream);
             }
         }
 
