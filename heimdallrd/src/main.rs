@@ -1,8 +1,7 @@
 use std::process;
 use std::collections::HashMap;
 use std::net::{TcpStream, TcpListener};
-use std::net::{Ipv4Addr, SocketAddrV4};
-use std::io::{Write, Read};
+use std::net::{Ipv4Addr, SocketAddrV4, SocketAddr};
 
 use heimdallr::ClientInfoPkt;
 use heimdallr::DaemonReplyPkt;
@@ -35,15 +34,16 @@ impl Daemon
         let job = self.jobs.entry(client_info.job.clone()).or_insert(Job::new(client_info.job, client_info.size).unwrap());
 
         job.clients.push(stream);
+        job.client_listeners.push(client_info.listener_addr);
 
         if job.clients.len() as u32 == (job.size)
         {
             println!("All {} clients for job: {} have been found.", job.size, job.name);
-            for (idx, mut stream) in job.clients.iter().enumerate()
+            for (idx, stream) in job.clients.iter().enumerate()
             {
                 // TODO make nicer
                 println!("{} : {}", idx, stream.peer_addr().unwrap());
-                let reply = DaemonReplyPkt::new(idx as u32);
+                let reply = DaemonReplyPkt::new(idx as u32, &job.clients, &job.client_listeners);
                 reply.send(&stream);
             }
         }
@@ -58,6 +58,7 @@ struct Job
     name: String,
     size: u32,
     clients: Vec<TcpStream>,
+    client_listeners: Vec<SocketAddr>,
 }
 
 impl Job
@@ -65,7 +66,8 @@ impl Job
     fn new(name: String, size: u32) -> Result<Job, &'static str>
     {
         let clients = Vec::<TcpStream>::new();
-        Ok(Job {name, size, clients})
+        let client_listeners = Vec::<SocketAddr>::new();
+        Ok(Job {name, size, clients, client_listeners})
     }
 }
 
