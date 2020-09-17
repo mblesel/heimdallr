@@ -4,11 +4,15 @@ use heimdallr::HeimdallrClient;
 
 fn test_send_rec(client: &HeimdallrClient, from: u32, to: u32) 
 {
-    let buf = String::from("TEST");
+    let buf = format!("TEST Message from client {}", client.id);
     match client.id
     {
         f if f == from => client.send(&buf, to).unwrap(),
-        t if t == to => client.receive::<String>(from).unwrap(),
+        t if t == to =>
+        {
+            let rec = client.receive::<String>(from).unwrap();
+            println!("Received: {}", rec);
+        },
         _ => (),
     }
 }
@@ -23,11 +27,6 @@ fn main() -> std::io::Result<()>
     let client = HeimdallrClient::init(job, size, addr).unwrap();
 
     println!("Client created successfuly.\n{}", client);
-    println!("Client list:");
-    for (id, addr) in client.client_sockets.iter().enumerate()
-    {
-        println!("  id: {}, addr: {}", id, addr);
-    }
     println!("Client listener addrs:");
     for (id, addr) in client.client_listeners.iter().enumerate()
     {
@@ -36,6 +35,7 @@ fn main() -> std::io::Result<()>
     
     test_send_rec(&client, 0, 1);
     test_send_rec(&client, 1, 2);
+    test_send_rec(&client, 2, 0);
     
     Ok(())
 }

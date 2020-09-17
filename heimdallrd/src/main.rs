@@ -43,7 +43,7 @@ impl Daemon
             {
                 // TODO make nicer
                 println!("{} : {}", idx, stream.peer_addr().unwrap());
-                let reply = DaemonReplyPkt::new(idx as u32, &job.clients, &job.client_listeners);
+                let reply = DaemonReplyPkt::new(idx as u32, &job.client_listeners);
                 reply.send(&stream);
             }
         }

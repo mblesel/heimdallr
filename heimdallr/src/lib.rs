@@ -1,7 +1,7 @@
 use std::process;
 use std::net::{TcpStream, TcpListener};
 use std::net::{SocketAddr,SocketAddrV4};
-use std::io::{Write, Read};
+use std::io::{Write};
 use std::fmt;
 use serde::{Serialize, Deserialize};
 
@@ -10,7 +10,6 @@ pub struct HeimdallrClient
     pub job: String,
     pub size: u32,
     pub id: u32,
-    pub client_sockets: Vec<SocketAddr>,
     pub listener: TcpListener,
     pub client_listeners: Vec<SocketAddr>,
 }
@@ -30,29 +29,29 @@ impl HeimdallrClient
         let daemon_reply = DaemonReplyPkt::receive(&stream);
 
         Ok(HeimdallrClient {job, size, id:daemon_reply.id,
-            client_sockets:daemon_reply.client_sockets, listener,
-            client_listeners: daemon_reply.client_listeners})
+            listener, client_listeners: daemon_reply.client_listeners})
     }
 
     pub fn send<T>(&self, data: &T, dest: u32) -> Result<(), &'static str>
+        where T: Serialize,
     {
         let mut stream = client_connect(self.client_listeners.get(dest as usize).unwrap()).unwrap();
 
-        stream.write(b"Hello from other client");
+        let msg = serde_json::to_string(data).unwrap();
+        stream.write(msg.as_bytes()).unwrap();
 
         Ok(())
     }
 
-    pub fn receive<T>(&self, source: u32) -> Result<(), &'static str>
+    pub fn receive<'a, T>(&self, source: u32) -> Result<T, &'static str>
+        where T: Deserialize<'a>,
     {
-        let mut stream = client_listen(&self.listener).unwrap();
+        let stream = client_listen(&self.listener).unwrap();
 
-        let mut buf = String::new();
-        stream.read_to_string(&mut buf);
+        let mut de = serde_json::Deserializer::from_reader(stream);
+        let data = T::deserialize(&mut de).unwrap();
 
-        println!("Received: {}", buf);
-
-        Ok(())
+        Ok(data)
     }
 }
 
@@ -100,22 +99,14 @@ impl ClientInfoPkt
 pub struct DaemonReplyPkt
 {
     pub id: u32,
-    pub client_sockets: Vec<SocketAddr>,
     pub client_listeners: Vec<SocketAddr>,
 }
 
 impl DaemonReplyPkt
 {
-    pub fn new(id: u32, clients: &Vec<TcpStream>, client_listeners: &Vec<SocketAddr>) -> DaemonReplyPkt
+    pub fn new(id: u32, client_listeners: &Vec<SocketAddr>) -> DaemonReplyPkt
     {
-        let mut client_sockets = Vec::<SocketAddr>::new();
-
-        for stream in clients.iter()
-        {
-            client_sockets.push(stream.peer_addr().unwrap());
-        }
-
-        DaemonReplyPkt {id, client_sockets,client_listeners: client_listeners.to_vec()}
+        DaemonReplyPkt {id, client_listeners: client_listeners.to_vec()}
     }
 
     pub fn send(&self, mut stream: &TcpStream)
@@ -152,6 +143,7 @@ fn client_connect(addr: &SocketAddr) -> std::io::Result<TcpStream>
     Ok(stream)
 }
 
+// TODO add check that connection comes from right client
 fn client_listen(listener: &TcpListener) -> std::io::Result<TcpStream>
 {
     let (stream, _) = listener.accept()?;
