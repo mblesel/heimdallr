@@ -54,25 +54,30 @@ impl Daemon
 
     fn create_partition_file(&self) -> std::io::Result<()>
     {
-        // TODO use XDG_CONFIG_HOME env var
-        let home = env::var("HOME").unwrap();
-        let p = format!("{}/.config/heimdallr/{}",home, self.partition);
-        let path = Path::new(&p);
-
-        if path.exists() == false
+        let config_home = match env::var("XDG_CONFIG_HOME")
         {
-            fs::create_dir_all(path)?;
+            Ok(path) => path,
+            Err(_) => 
+            {
+                eprintln!("XDG_CONFIG_HOME is not set. Falling back to default path: ~/.config");
+                let home = env::var("HOME").unwrap();
+                format!("{}/.config", home)
+            },
+        };
+
+        let path = format!("{}/heimdallr/{}", config_home, &self.partition);
+        if Path::new(&path).exists() == false
+        {
+            fs::create_dir_all(&path)?;
         }
 
-        // TODO make ::new
-        let file = DaemonConfig{name:self.name.clone(), partition:self.partition.clone(),
-                 client_addr:self.client_addr.clone(), daemon_addr:self.daemon_addr.clone()};
+        let daemon_config = DaemonConfig::new(self.name.clone(), self.partition.clone(),
+                 self.client_addr.clone(), self.daemon_addr.clone());
 
-        let file_path = format!("{}/{}", p, self.name);
-
-        let serialzed = serde_json::to_string(&file).unwrap();
-
+        let file_path = format!("{}/{}", path, self.name);
+        let serialzed = serde_json::to_string(&daemon_config).unwrap();
         fs::write(&file_path, serialzed)?;
+        println!("Writing heimdallr daemon config to: {}", file_path);
 
         Ok(())
     }
@@ -93,7 +98,6 @@ impl Daemon
             println!("All {} clients for job: {} have been found.", job.size, job.name);
             for (idx, stream) in job.clients.iter().enumerate()
             {
-                // TODO make nicer
                 println!("{} : {}", idx, stream.peer_addr().unwrap());
                 let reply = DaemonReplyPkt::new(idx as u32, &job.client_listeners);
                 reply.send(&stream);
@@ -183,13 +187,13 @@ fn main()
 {
     let (name, partition) = parse_args(env::args()).unwrap_or_else(|err|
         {
-            eprintln!("Problem parsing arguments: {}", err);
+            eprintln!("Error: Problem parsing arguments: {}", err);
             process::exit(1);
         });
             
     let daemon = Daemon::new(name, partition).unwrap_or_else(|err|
         {
-            eprintln!("Could not start daemon correctly: {} \n Shutting down.", err);
+            eprintln!("Error: Could not start daemon correctly: {} \n Shutting down.", err);
             process::exit(1);
         });
 

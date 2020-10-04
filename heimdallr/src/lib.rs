@@ -25,7 +25,7 @@ impl HeimdallrClient
         -> Result<HeimdallrClient, &'static str>
     {
 
-        let job = match args.next()
+        let mut job = match args.next()
         {
             Some(arg) => arg,
             None => "".to_string(),
@@ -35,18 +35,16 @@ impl HeimdallrClient
         let mut size: u32 = 0;
         let mut node = "".to_string();
 
-        // TODO checks for necessary arguments
         while let Some(arg) = args.next()
         {
             match arg.as_str()
             {
-                // TODO job name
                 "-p" | "--partition" => 
                 {
                     partition = match args.next()
                     {
                         Some(p) => p,
-                        None => return Err("Error in partition argument.")
+                        None => return Err("Error in partition argument."),
                     };
                 },
                 "-j" | "--jobs" => 
@@ -54,7 +52,7 @@ impl HeimdallrClient
                     size = match args.next()
                     {
                         Some(s) => s.parse().unwrap(),
-                        None => return Err("Error in setting job count.")
+                        None => return Err("Error in setting job count."),
                     };
                 },
                 "-n" | "--node" => 
@@ -62,13 +60,26 @@ impl HeimdallrClient
                     node = match args.next()
                     {
                         Some(n) => n,
-                        None => return Err("Error in setting node.")
+                        None => return Err("Error in setting node."),
+                    };
+                },
+                "--job-name" =>
+                {
+                    job = match args.next()
+                    {
+                        Some(jn) => jn,
+                        None => return Err("Error in setting job-name."),
                     };
                 },
                 _ => (),
             };
         }
 
+        if partition.is_empty() | node.is_empty() | (size == 0)
+        {
+            eprintln!("Error: client did not provide all necessary arguments.\n  partition: {}\n  node: {}\n  jobs: {}\nShutting down.", &partition, &node, size);
+            process::exit(1);
+        }
 
         // Find daemon address from daemon config file
         let home = env::var("HOME").unwrap();
@@ -122,7 +133,6 @@ impl HeimdallrClient
     }
 }
 
-// TODO update
 impl fmt::Display for HeimdallrClient
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
@@ -140,6 +150,15 @@ pub struct DaemonConfig
     pub partition: String,
     pub client_addr: SocketAddr,
     pub daemon_addr: SocketAddr,
+}
+
+impl DaemonConfig
+{
+    pub fn new(name: String, partition: String, client_addr: SocketAddr, daemon_addr: SocketAddr)
+        -> DaemonConfig
+    {
+        DaemonConfig{name, partition, client_addr, daemon_addr}
+    }
 }
 
 
@@ -222,7 +241,6 @@ fn client_connect(addr: &SocketAddr) -> std::io::Result<TcpStream>
     Ok(stream)
 }
 
-// TODO add check that connection comes from right client
 fn client_listen(listener: &TcpListener) -> std::io::Result<TcpStream>
 {
     let (stream, _) = listener.accept()?;
