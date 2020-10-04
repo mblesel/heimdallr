@@ -1,28 +1,80 @@
 use std::process;
 use std::collections::HashMap;
 use std::net::{TcpStream, TcpListener};
-use std::net::{Ipv4Addr, SocketAddrV4, SocketAddr};
+use std::net::{SocketAddr,IpAddr};
+use std::path::Path;
+use std::env;
+use std::fs;
+use std::str::FromStr;
+
+use local_ipaddress;
 
 use heimdallr::ClientInfoPkt;
 use heimdallr::DaemonReplyPkt;
+use heimdallr::DaemonConfig;
 
 
 struct Daemon
 {
     name: String,
-    addr: SocketAddrV4,
-    listener: TcpListener,
+    partition: String, 
+    client_addr: SocketAddr,
+    daemon_addr: SocketAddr,
+    client_listener: TcpListener,
+    daemon_listener: TcpListener,
     jobs: HashMap<String, Job>,
 }
 
+
 impl Daemon
 {
-    fn new(name: String, addr: SocketAddrV4) -> std::io::Result<Daemon>
+    fn new(name: String, partition: String,) -> std::io::Result<Daemon>
     {
-        let listener = TcpListener::bind(addr)?;
+        // Get IP of this node
+        let ip = match local_ipaddress::get()
+        {
+            Some(i) => IpAddr::from_str(&i).unwrap(),
+            None => IpAddr::from_str("0.0.0.0").unwrap(),
+        };
+        let client_addr = SocketAddr::new(ip, 4664);
+        let client_listener = TcpListener::bind(client_addr)?;
+
+        let daemon_addr = SocketAddr::new(ip, 4665);
+        let daemon_listener = TcpListener::bind(daemon_addr)?;
+
         let jobs = HashMap::<String, Job>::new();
-        
-        Ok(Daemon {name, addr, listener, jobs})
+
+        let daemon = Daemon{name, partition, client_addr, daemon_addr,
+                 client_listener, daemon_listener, jobs};
+
+        daemon.create_partition_file()?;
+
+        Ok(daemon)
+    }
+
+    fn create_partition_file(&self) -> std::io::Result<()>
+    {
+        // TODO use XDG_CONFIG_HOME env var
+        let home = env::var("HOME").unwrap();
+        let p = format!("{}/.config/heimdallr/{}",home, self.partition);
+        let path = Path::new(&p);
+
+        if path.exists() == false
+        {
+            fs::create_dir_all(path)?;
+        }
+
+        // TODO make ::new
+        let file = DaemonConfig{name:self.name.clone(), partition:self.partition.clone(),
+                 client_addr:self.client_addr.clone(), daemon_addr:self.daemon_addr.clone()};
+
+        let file_path = format!("{}/{}", p, self.name);
+
+        let serialzed = serde_json::to_string(&file).unwrap();
+
+        fs::write(&file_path, serialzed)?;
+
+        Ok(())
     }
 
     fn new_connection(&mut self, stream: TcpStream) -> std::io::Result<()>
@@ -75,7 +127,7 @@ impl Job
 fn run(mut daemon: Daemon) -> Result<(), &'static str>
 {
     println!("Listening for new client connections.");
-    for stream in daemon.listener.try_clone().unwrap().incoming()
+    for stream in daemon.client_listener.try_clone().unwrap().incoming()
     {
         match stream
         {
@@ -92,19 +144,56 @@ fn run(mut daemon: Daemon) -> Result<(), &'static str>
     Ok(())
 }
 
+fn parse_args(mut args: std::env::Args) -> Result<(String, String), &'static str>
+{
+    args.next();
+
+    let mut partition = String::new();
+    let mut name = String::new();
+
+    while let Some(arg) = args.next()
+    {
+        match arg.as_str()
+        {
+            "-p" | "--partition" => 
+            {
+                partition = match args.next()
+                {
+                    Some(p) => p.to_string(),
+                    None => return Err("No valid partition name given."),
+                };
+            },
+            "-n" | "--name" => 
+            {
+                name = match args.next()
+                {
+                    Some(n) => n.to_string(),
+                    None => return Err("No valid daemon name given."),
+                };
+            },
+            _ => return Err("Unknown argument error."),
+        };
+    }
+
+    Ok((name, partition))
+}
+
 
 fn main() 
 {
-    // TODO: Make port/name read from config or take them as args
-    let name = String::from("heimdallrd");
-    let addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 4664);
-    let daemon = Daemon::new(name, addr).unwrap_or_else(|err|
+    let (name, partition) = parse_args(env::args()).unwrap_or_else(|err|
+        {
+            eprintln!("Problem parsing arguments: {}", err);
+            process::exit(1);
+        });
+            
+    let daemon = Daemon::new(name, partition).unwrap_or_else(|err|
         {
             eprintln!("Could not start daemon correctly: {} \n Shutting down.", err);
             process::exit(1);
         });
 
-    println!("Daemon running under name: {} and address: {}", daemon.name, daemon.addr);
+    println!("Daemon running under name: {} and address: {}", daemon.name, daemon.client_addr);
 
     run(daemon).unwrap_or_else(|err|
         {

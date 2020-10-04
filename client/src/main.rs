@@ -1,4 +1,5 @@
-use std::net::{Ipv4Addr, SocketAddrV4};
+// use std::net::{Ipv4Addr, SocketAddrV4};
+use std::env;
 
 use heimdallr::HeimdallrClient;
 
@@ -20,11 +21,7 @@ fn test_send_rec(client: &HeimdallrClient, from: u32, to: u32)
 
 fn main() -> std::io::Result<()>
 {
-    let job = String::from("test_job");
-    let size: u32 = 3;
-    let addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 4664);
-    
-    let client = HeimdallrClient::init(job, size, addr).unwrap();
+    let client = HeimdallrClient::init(env::args()).unwrap();
 
     println!("Client created successfuly.\n{}", client);
     println!("Client listener addrs:");

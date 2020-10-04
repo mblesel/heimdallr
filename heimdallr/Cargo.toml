@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 serde = {version = "*", features = ["derive"]}
 serde_json= "*"
+local_ipaddress = "*"

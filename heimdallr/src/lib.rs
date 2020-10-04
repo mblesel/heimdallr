@@ -1,9 +1,14 @@
 use std::process;
 use std::net::{TcpStream, TcpListener};
-use std::net::{SocketAddr,SocketAddrV4};
-use std::io::{Write};
+use std::net::{SocketAddr, IpAddr};
+use std::io::{Write, BufReader};
 use std::fmt;
+use std::env;
+use std::fs::File;
+use std::str::FromStr;
+
 use serde::{Serialize, Deserialize};
+use local_ipaddress;
 
 pub struct HeimdallrClient
 {
@@ -16,18 +21,80 @@ pub struct HeimdallrClient
 
 impl HeimdallrClient
 {
-    pub fn init(job: String, size: u32, daemon_addr: SocketAddrV4)
+    pub fn init(mut args: std::env::Args)
         -> Result<HeimdallrClient, &'static str>
     {
-        let stream = connect(daemon_addr);
-        //TODO
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
 
+        let job = match args.next()
+        {
+            Some(arg) => arg,
+            None => "".to_string(),
+        };
+
+        let mut partition = "".to_string();
+        let mut size: u32 = 0;
+        let mut node = "".to_string();
+
+        // TODO checks for necessary arguments
+        while let Some(arg) = args.next()
+        {
+            match arg.as_str()
+            {
+                // TODO job name
+                "-p" | "--partition" => 
+                {
+                    partition = match args.next()
+                    {
+                        Some(p) => p,
+                        None => return Err("Error in partition argument.")
+                    };
+                },
+                "-j" | "--jobs" => 
+                {
+                    size = match args.next()
+                    {
+                        Some(s) => s.parse().unwrap(),
+                        None => return Err("Error in setting job count.")
+                    };
+                },
+                "-n" | "--node" => 
+                {
+                    node = match args.next()
+                    {
+                        Some(n) => n,
+                        None => return Err("Error in setting node.")
+                    };
+                },
+                _ => (),
+            };
+        }
+
+
+        // Find daemon address from daemon config file
+        let home = env::var("HOME").unwrap();
+        let path = format!("{}/.config/heimdallr/{}/{}",home, &partition, &node);
+        let file = File::open(path).unwrap();
+        let reader = BufReader::new(file);
+        let daemon_config: DaemonConfig = serde_json::from_reader(reader).unwrap();
+        // let daemon_config = DaemonConfig::deserialize(&content).unwrap();
+
+
+        let stream = connect(daemon_config.client_addr);
+
+        // Get IP of this node
+        let ip = match local_ipaddress::get()
+        {
+            Some(i) => IpAddr::from_str(&i).unwrap(),
+            None => IpAddr::from_str("0.0.0.0").unwrap(),
+        };
+        let listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
+        
         let client_info = ClientInfoPkt::new(job.clone(), size, listener.local_addr().unwrap());
         client_info.send(&stream);
 
         let daemon_reply = DaemonReplyPkt::receive(&stream);
 
+        
         Ok(HeimdallrClient {job, size, id:daemon_reply.id,
             listener, client_listeners: daemon_reply.client_listeners})
     }
@@ -55,6 +122,7 @@ impl HeimdallrClient
     }
 }
 
+// TODO update
 impl fmt::Display for HeimdallrClient
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
@@ -63,6 +131,17 @@ impl fmt::Display for HeimdallrClient
             self.job, self.size, self.id)
     }
 }
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DaemonConfig
+{
+    pub name: String,
+    pub partition: String,
+    pub client_addr: SocketAddr,
+    pub daemon_addr: SocketAddr,
+}
+
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ClientInfoPkt
@@ -124,7 +203,7 @@ impl DaemonReplyPkt
     }
 }
 
-fn connect(addr: SocketAddrV4) -> TcpStream
+fn connect(addr: SocketAddr) -> TcpStream
 {
     let stream = TcpStream::connect(addr).unwrap_or_else(|err|
         {
