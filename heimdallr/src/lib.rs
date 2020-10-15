@@ -1,9 +1,10 @@
 use std::process;
 use std::net::{TcpStream, TcpListener};
 use std::net::{SocketAddr, IpAddr};
-use std::io::{Write, BufReader};
+use std::io::{Write,BufReader};
 use std::fmt;
 use std::env;
+use std::thread;
 use std::fs::File;
 use std::str::FromStr;
 
@@ -121,15 +122,74 @@ impl HeimdallrClient
         Ok(())
     }
 
-    pub fn receive<'a, T>(&self, source: u32) -> Result<T, &'static str>
+    pub fn receive<'a, T>(&self) -> Result<T, &'static str>
         where T: Deserialize<'a>,
     {
         let stream = client_listen(&self.listener).unwrap();
 
-        let mut de = serde_json::Deserializer::from_reader(stream);
+        let reader = BufReader::new(stream);
+        let mut de = serde_json::Deserializer::from_reader(reader);
         let data = T::deserialize(&mut de).unwrap();
-
         Ok(data)
+    }
+
+    // WIP not yet stable
+    pub fn nb_send<T>(&self, data: &T, dest: u32) -> Result<(), &'static str>
+        where T: Serialize,
+    {
+        let mut stream = client_connect(self.client_listeners.get(dest as usize).unwrap()).unwrap();
+        stream.set_nonblocking(true).unwrap();
+
+        let msg = serde_json::to_string(data).unwrap();
+        stream.write(msg.as_bytes()).unwrap();
+
+        Ok(())
+    }
+
+    // WIP not yet stable
+    pub fn nb_receive<'a, T>(&self) -> Result<T, &'static str>
+        where T: Deserialize<'a>,
+    {
+        let stream = client_listen(&self.listener).unwrap();
+
+        let reader = BufReader::new(stream);
+        let mut de = serde_json::Deserializer::from_reader(reader);
+        let data = T::deserialize(&mut de).unwrap();
+        Ok(data)
+    }
+
+
+    pub fn send_async<T>(&self, data: T, dest: u32) -> Result<AsyncSend<T>, &'static str>
+        where T: Serialize + std::marker::Send + 'static,
+    {
+        let dest_addr = self.client_listeners.get(dest as usize).unwrap().clone();
+        let t = thread::spawn(move || 
+            {
+                let mut stream = client_connect(&dest_addr).unwrap();
+
+                let msg = serde_json::to_string(&data).unwrap();
+                stream.write(msg.as_bytes()).unwrap();
+                data
+            });
+        
+        Ok(AsyncSend::<T>::new(t))
+    }
+
+    pub fn receive_async<'a, T>(&self) -> Result<AsyncReceive<T>, &'static str>
+        where T: Deserialize<'a> + std::marker::Send + 'static,
+    {
+        let listener_addr = self.listener.try_clone().unwrap();
+        let t = thread::spawn(move ||
+            {
+                let stream = client_listen(&listener_addr).unwrap();
+
+                let reader = BufReader::new(stream);
+                let mut de = serde_json::Deserializer::from_reader(reader);
+                let data = T::deserialize(&mut de).unwrap();
+                data
+            });
+
+        Ok(AsyncReceive::<T>::new(t))
     }
 }
 
@@ -141,6 +201,48 @@ impl fmt::Display for HeimdallrClient
             self.job, self.size, self.id)
     }
 }
+
+
+pub struct AsyncSend<T>
+{
+    t: thread::JoinHandle<T>
+}
+
+impl<T> AsyncSend<T>
+{
+    pub fn new(t: thread::JoinHandle<T>) -> AsyncSend<T>
+    {
+        AsyncSend::<T>{t}
+    }
+
+    pub fn data(self) -> T
+    {
+        let data = self.t.join().unwrap();
+        data
+    }
+}
+
+
+pub struct AsyncReceive<T>
+{
+    t: thread::JoinHandle<T>,
+}
+
+impl<T> AsyncReceive<T>
+{
+    pub fn new(t: thread::JoinHandle<T>) -> AsyncReceive<T>
+    {
+        AsyncReceive::<T>{t}
+    }
+
+    pub fn data(self) -> T
+    {
+        let data = self.t.join().unwrap();
+        data
+    }
+}
+
+
 
 
 #[derive(Serialize, Deserialize, Debug)]

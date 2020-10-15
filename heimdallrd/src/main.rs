@@ -21,7 +21,7 @@ struct Daemon
     client_addr: SocketAddr,
     daemon_addr: SocketAddr,
     client_listener: TcpListener,
-    daemon_listener: TcpListener,
+    _daemon_listener: TcpListener,
     jobs: HashMap<String, Job>,
 }
 
@@ -40,12 +40,12 @@ impl Daemon
         let client_listener = TcpListener::bind(client_addr)?;
 
         let daemon_addr = SocketAddr::new(ip, 4665);
-        let daemon_listener = TcpListener::bind(daemon_addr)?;
+        let _daemon_listener = TcpListener::bind(daemon_addr)?;
 
         let jobs = HashMap::<String, Job>::new();
 
         let daemon = Daemon{name, partition, client_addr, daemon_addr,
-                 client_listener, daemon_listener, jobs};
+                 client_listener, _daemon_listener, jobs};
 
         daemon.create_partition_file()?;
 
