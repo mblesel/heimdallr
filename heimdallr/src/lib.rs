@@ -2,6 +2,8 @@ use std::process;
 use std::net::{TcpStream, TcpListener};
 use std::net::{SocketAddr, IpAddr};
 use std::io::{Write,BufReader};
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use std::fmt;
 use std::env;
 use std::thread;
@@ -18,6 +20,8 @@ pub struct HeimdallrClient
     pub id: u32,
     pub listener: TcpListener,
     pub client_listeners: Vec<SocketAddr>,
+    readers: Arc<Mutex<HashMap<(u32,u32),SocketAddr>>>
+
 }
 
 impl HeimdallrClient
@@ -106,87 +110,137 @@ impl HeimdallrClient
 
         let daemon_reply = DaemonReplyPkt::receive(&stream);
 
+
+        let readers = Arc::new(Mutex::new(HashMap::<(u32,u32),SocketAddr>::new()));
         
-        Ok(HeimdallrClient {job, size, id:daemon_reply.id,
-            listener, client_listeners: daemon_reply.client_listeners})
+        let client = HeimdallrClient {job, size, id:daemon_reply.id,
+            listener, client_listeners: daemon_reply.client_listeners,
+            readers};
+
+        client.listener_handler();
+
+        Ok(client)
     }
 
-    pub fn send<T>(&self, data: &T, dest: u32) -> Result<(), &'static str>
+    pub fn listener_handler(&self)
+    {
+        let listener = self.listener.try_clone().unwrap();
+        let readers = Arc::clone(&self.readers);
+
+        thread::spawn(move || 
+            {
+                for stream in listener.incoming()
+                {
+                    match stream
+                    {
+                        Ok(stream) =>
+                        {
+                            let reader = BufReader::new(stream);
+                            let mut de = serde_json::Deserializer::from_reader(reader);
+                            let op_pkt = ClientOperationPkt::deserialize(&mut de).unwrap();
+                            let mut r = readers.lock().unwrap();
+                            r.insert((op_pkt.client_id, op_pkt.op_id), op_pkt.addr);
+                        },
+                        Err(e) =>
+                        {
+                            eprintln!("Error in daemon listening to incoming connections: {}", e);
+                        }
+                    }
+                }
+            });
+    }
+
+    pub fn send<T>(&self, data: &T, dest: u32, id: u32) -> Result<(), &'static str>
         where T: Serialize,
     {
         let mut stream = client_connect(self.client_listeners.get(dest as usize).unwrap()).unwrap();
 
-        let msg = serde_json::to_string(data).unwrap();
-        stream.write(msg.as_bytes()).unwrap();
+        let ip = self.listener.local_addr().unwrap().ip();
+        let op_listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
+        let op_pkt = ClientOperationPkt{client_id: self.id, op_id: id, addr: op_listener.local_addr().unwrap()};   
+        let op_msg = serde_json::to_string(&op_pkt).unwrap();
+        stream.write(op_msg.as_bytes()).unwrap();
+        stream.flush().unwrap();
 
+        let (mut stream2, _) = op_listener.accept().unwrap();
+        let msg = serde_json::to_string(data).unwrap();
+        stream2.write(msg.as_bytes()).unwrap();
+        
         Ok(())
     }
 
-    pub fn receive<'a, T>(&self) -> Result<T, &'static str>
+    pub fn receive<'a, T>(&self, source: u32, id: u32) -> Result<T, &'static str>
         where T: Deserialize<'a>,
     {
-        let stream = client_listen(&self.listener).unwrap();
-
-        let reader = BufReader::new(stream);
-        let mut de = serde_json::Deserializer::from_reader(reader);
-        let data = T::deserialize(&mut de).unwrap();
-        Ok(data)
+        loop
+        {
+            let mut r = self.readers.lock().unwrap();
+            let addr = r.remove(&(source,id));
+            match addr
+            {
+                Some(a) =>
+                {
+                    let stream = TcpStream::connect(a).unwrap();
+                    let reader = BufReader::new(stream);
+                    let mut de = serde_json::Deserializer::from_reader(reader);
+                    let data = T::deserialize(&mut de).unwrap();
+                    return Ok(data);
+                },
+                None => continue,
+            }
+        }
     }
 
-    // WIP not yet stable
-    pub fn nb_send<T>(&self, data: &T, dest: u32) -> Result<(), &'static str>
-        where T: Serialize,
-    {
-        let mut stream = client_connect(self.client_listeners.get(dest as usize).unwrap()).unwrap();
-        stream.set_nonblocking(true).unwrap();
-
-        let msg = serde_json::to_string(data).unwrap();
-        stream.write(msg.as_bytes()).unwrap();
-
-        Ok(())
-    }
-
-    // WIP not yet stable
-    pub fn nb_receive<'a, T>(&self) -> Result<T, &'static str>
-        where T: Deserialize<'a>,
-    {
-        let stream = client_listen(&self.listener).unwrap();
-
-        let reader = BufReader::new(stream);
-        let mut de = serde_json::Deserializer::from_reader(reader);
-        let data = T::deserialize(&mut de).unwrap();
-        Ok(data)
-    }
-
-
-    pub fn send_async<T>(&self, data: T, dest: u32) -> Result<AsyncSend<T>, &'static str>
+    pub fn send_async<T>(&self, data: T, dest: u32, id: u32) -> Result<AsyncSend<T>, &'static str>
         where T: Serialize + std::marker::Send + 'static,
     {
         let dest_addr = self.client_listeners.get(dest as usize).unwrap().clone();
+        let ip = self.listener.local_addr().unwrap().ip();
+        let self_id = self.id;
         let t = thread::spawn(move || 
             {
                 let mut stream = client_connect(&dest_addr).unwrap();
+                let op_listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
+                let op_pkt = ClientOperationPkt{client_id: self_id, op_id: id,
+                    addr: op_listener.local_addr().unwrap()};   
+                let op_msg = serde_json::to_string(&op_pkt).unwrap();
+                stream.write(op_msg.as_bytes()).unwrap();
+                stream.flush().unwrap();
 
+                let (mut stream2, _) = op_listener.accept().unwrap();
                 let msg = serde_json::to_string(&data).unwrap();
-                stream.write(msg.as_bytes()).unwrap();
+                stream2.write(msg.as_bytes()).unwrap();
+
                 data
             });
         
         Ok(AsyncSend::<T>::new(t))
     }
 
-    pub fn receive_async<'a, T>(&self) -> Result<AsyncReceive<T>, &'static str>
+    pub fn receive_async<'a, T>(&self, source: u32, id: u32) -> Result<AsyncReceive<T>, &'static str>
         where T: Deserialize<'a> + std::marker::Send + 'static,
     {
-        let listener_addr = self.listener.try_clone().unwrap();
+        let readers = Arc::clone(&self.readers);
+
         let t = thread::spawn(move ||
             {
-                let stream = client_listen(&listener_addr).unwrap();
-
-                let reader = BufReader::new(stream);
-                let mut de = serde_json::Deserializer::from_reader(reader);
-                let data = T::deserialize(&mut de).unwrap();
-                data
+                loop
+                {
+                    let mut r = readers.lock().unwrap();
+                    let addr = r.remove(&(source,id));
+                    match addr
+                    {
+                        Some(a) =>
+                        {
+                            let stream = TcpStream::connect(a).unwrap();
+                            let reader = BufReader::new(stream);
+                            let mut de = serde_json::Deserializer::from_reader(reader);
+                            let data = T::deserialize(&mut de).unwrap();
+                            return data;
+                        },
+                        None => continue,
+                    }
+                }
             });
 
         Ok(AsyncReceive::<T>::new(t))
@@ -324,6 +378,16 @@ impl DaemonReplyPkt
     }
 }
 
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ClientOperationPkt
+{
+    pub client_id: u32,
+    pub op_id: u32,
+    pub addr: SocketAddr,
+}
+
+
 fn connect(addr: SocketAddr) -> TcpStream
 {
     let stream = TcpStream::connect(addr).unwrap_or_else(|err|
@@ -340,11 +404,5 @@ fn connect(addr: SocketAddr) -> TcpStream
 fn client_connect(addr: &SocketAddr) -> std::io::Result<TcpStream>
 {
     let stream = TcpStream::connect(addr)?;
-    Ok(stream)
-}
-
-fn client_listen(listener: &TcpListener) -> std::io::Result<TcpStream>
-{
-    let (stream, _) = listener.accept()?;
     Ok(stream)
 }
