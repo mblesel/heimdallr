@@ -38,8 +38,7 @@ fn _client_test_1() -> std::io::Result<()>
     _test_send_rec(&client, 1, 2);
     _test_send_rec(&client, 2, 0);
     
-    Ok(())
-}
+    Ok(()) }
 
 fn _big_vec_send_rec() -> std::io::Result<()>
 {
@@ -160,10 +159,37 @@ fn _gather_test() -> std::io::Result<()>
 }
 
 
+fn _mutex_test() -> std::io::Result<()>
+{
+    let client = HeimdallrClient::init(env::args()).unwrap();
+
+    let mut mutex = client.create_mutex("testmutex".to_string(), 0 as u64);
+
+    {
+        let mut m = mutex.lock().unwrap();
+        println!("before: {}", m.get());
+        m.set(m.get()+42);
+        println!("after: {}", m.get());
+    }
+
+    let mut mutex2 = client.create_mutex("testmutex2".to_string(), "".to_string());
+
+    {
+        let mut m = mutex2.lock().unwrap();
+        println!("before: {}", m.get());
+        let s = format!("Client {} was here", client.id);
+        m.set(s);
+        println!("after: {}", m.get());
+    }
+
+    Ok(())
+}
+
+
 
 fn main() -> std::io::Result<()>
 {
-    _gather_test()?;   
+    _mutex_test()?;   
     Ok(())
 }
 

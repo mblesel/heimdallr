@@ -2,14 +2,24 @@ use std::process;
 use std::collections::HashMap;
 use std::net::{TcpStream, TcpListener};
 use std::net::{SocketAddr,IpAddr};
+use std::io::Write;
 use std::path::Path;
 use std::env;
 use std::fs;
 use std::str::FromStr;
+use std::collections::VecDeque;
+
+use serde::de::Deserialize;
 
 use local_ipaddress;
 
+use heimdallr::DaemonPkt;
+use heimdallr::DaemonPktType;
 use heimdallr::ClientInfoPkt;
+use heimdallr::MutexCreationPkt;
+use heimdallr::MutexCreationReplyPkt;
+use heimdallr::MutexLockReqPkt;
+use heimdallr::MutexWriteAndReleasePkt;
 use heimdallr::DaemonReplyPkt;
 use heimdallr::DaemonConfig;
 
@@ -82,26 +92,78 @@ impl Daemon
         Ok(())
     }
 
-    fn new_connection(&mut self, stream: TcpStream) -> std::io::Result<()>
+    fn handle_client_connection(&mut self, stream: TcpStream) -> std::io::Result<()>
     {
         println!("New client connected from: {}", stream.peer_addr()?);
 
-        let client_info = ClientInfoPkt::receive(&stream);
+        let mut de = serde_json::Deserializer::from_reader(&stream);
+        let pkt = DaemonPkt::deserialize(&mut de).unwrap();
 
-        let job = self.jobs.entry(client_info.job.clone()).or_insert(Job::new(client_info.job, client_info.size).unwrap());
+        println!("  Pkt type: {:?}", pkt.pkt_type);
 
-        job.clients.push(stream);
-        job.client_listeners.push(client_info.listener_addr);
-
-        if job.clients.len() as u32 == (job.size)
+        match pkt.pkt_type
         {
-            println!("All {} clients for job: {} have been found.", job.size, job.name);
-            for (idx, stream) in job.clients.iter().enumerate()
+            DaemonPktType::ClientInfoPkt =>
             {
-                println!("{} : {}", idx, stream.peer_addr().unwrap());
-                let reply = DaemonReplyPkt::new(idx as u32, &job.client_listeners);
-                reply.send(&stream);
-            }
+                let client_info = serde_json::from_str::<ClientInfoPkt>(&pkt.pkt).unwrap();
+
+                let job = self.jobs.entry(client_info.job.clone())
+                    .or_insert(Job::new(client_info.job, client_info.size).unwrap());
+
+                job.clients.push(stream);
+                job.client_listeners.push(client_info.listener_addr);
+
+                if job.clients.len() as u32 == (job.size)
+                {
+                    println!("  All {} clients for job: {} have been found.", job.size, job.name);
+                    for (idx, stream) in job.clients.iter().enumerate()
+                    {
+                        println!("    {} : {}", idx, stream.peer_addr().unwrap());
+                        let reply = DaemonReplyPkt::new(idx as u32, &job.client_listeners);
+                        reply.send(&stream);
+                    }
+                }
+            },
+            DaemonPktType::MutexCreationPkt =>
+            {
+                let mutex_pkt = serde_json::from_str::<MutexCreationPkt>(&pkt.pkt).unwrap();
+
+                let job = self.jobs.get_mut(&pkt.job).unwrap();
+                let mutex = job.mutexes.entry(mutex_pkt.name.clone())
+                    .or_insert(HeimdallrDaemonMutex::new(mutex_pkt.name.clone(), job.size, mutex_pkt.start_data.clone()));
+                
+                mutex.register_client(stream);
+            },
+            DaemonPktType::MutexLockReqPkt =>
+            {
+                let lock_req_pkt = serde_json::from_str::<MutexLockReqPkt>(&pkt.pkt).unwrap();
+
+                let job = self.jobs.get_mut(&pkt.job).unwrap();
+                let mutex = job.mutexes.get_mut(&lock_req_pkt.name);
+
+                match mutex
+                {
+                    Some(m) => m.access_request(stream),
+                    None => eprintln!("Error: the requested mutex was not found."),
+                }
+            },
+            DaemonPktType::MutexWriteAndReleasePkt =>
+            {
+                let write_pkt = serde_json::from_str::<MutexWriteAndReleasePkt>(&pkt.pkt).unwrap();
+
+                let job = self.jobs.get_mut(&pkt.job).unwrap();
+                let mutex = job.mutexes.get_mut(&write_pkt.mutex_name);
+
+                match mutex
+                {
+                    Some(m) =>
+                    {
+                        m.data = write_pkt.data;
+                        m.release_request();
+                    },
+                    None => eprintln!("Error: the requested mutex was not found"),
+                }
+            },
         }
 
         Ok(())
@@ -115,6 +177,7 @@ struct Job
     size: u32,
     clients: Vec<TcpStream>,
     client_listeners: Vec<SocketAddr>,
+    mutexes: HashMap::<String, HeimdallrDaemonMutex>,
 }
 
 impl Job
@@ -123,7 +186,99 @@ impl Job
     {
         let clients = Vec::<TcpStream>::new();
         let client_listeners = Vec::<SocketAddr>::new();
-        Ok(Job {name, size, clients, client_listeners})
+        let mutexes = HashMap::<String, HeimdallrDaemonMutex>::new();
+        Ok(Job {name, size, clients, client_listeners, mutexes})
+    }
+}
+
+
+struct HeimdallrDaemonMutex
+{
+    name: String,
+    size: u32,
+    constructed: bool,
+    clients: Vec::<TcpStream>,
+    data: String,
+    access_queue: VecDeque::<TcpStream>,
+    locked: bool,
+    current_owner: Option::<TcpStream>,
+}
+
+//TODO destroy function
+impl HeimdallrDaemonMutex
+{
+    pub fn new(name: String, size: u32, start_data: String) -> HeimdallrDaemonMutex
+    {
+        let clients = Vec::<TcpStream>::new();
+        let data = start_data;
+        let access_queue = VecDeque::<TcpStream>::new();
+        
+        HeimdallrDaemonMutex{name, size, constructed: false, clients, data, access_queue,
+            locked:false, current_owner: None}
+    }
+
+    // TODO check for duplicate clients?
+    pub fn register_client(&mut self, stream: TcpStream)
+    {
+        self.clients.push(stream);
+
+        if self.clients.len() as u32 == self.size
+        {
+            for stream in &mut self.clients
+            {
+                let reply_pkt = MutexCreationReplyPkt::new(&self.name);
+                reply_pkt.send(stream).unwrap();
+            }
+            self.constructed = true;
+            println!("Mutex: {} has been created", self.name);
+        }
+    }
+
+    pub fn access_request(&mut self, stream: TcpStream)
+    {
+        self.access_queue.push_back(stream);
+        self.grant_next_lock();
+    }
+
+    pub fn release_request(&mut self)
+    {
+        if self.locked
+        {
+            self.locked = false;
+            self.current_owner = None;
+            self.grant_next_lock();
+        }
+        else
+        {
+            eprintln!("Error: Release request on Mutex that was not locked");
+        }
+    }
+
+    fn send_data(&mut self) -> Result<(), &'static str>
+    {
+        match &mut self.current_owner
+        {
+            Some(stream) =>
+            {
+                println!("  Sending mutex data: {}", self.data);
+                stream.write(self.data.as_bytes()).unwrap();
+                stream.flush().unwrap();
+                stream.shutdown(std::net::Shutdown::Both).unwrap();
+                Ok(())
+            },
+            None => Err("Error: Mutex has no current valid owner to send data to"),
+        }
+    }
+
+    fn grant_next_lock(&mut self)
+    {
+        if (!self.locked) & (!self.access_queue.is_empty())
+        {
+            self.current_owner = self.access_queue.pop_front();
+            self.locked = true;
+            println!("  Ownership of mutex given");
+            self.send_data().unwrap();
+        }
     }
 }
 
@@ -137,7 +292,7 @@ fn run(mut daemon: Daemon) -> Result<(), &'static str>
         {
             Ok(stream) =>
             {
-                daemon.new_connection(stream).unwrap();
+                daemon.handle_client_connection(stream).unwrap();
             },
             Err(e) =>
             {
