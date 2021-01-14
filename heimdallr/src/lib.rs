@@ -21,7 +21,9 @@ pub struct HeimdallrClient
     pub listener: TcpListener,
     pub client_listeners: Vec<SocketAddr>,
     daemon_addr: SocketAddr,
-    readers: Arc<Mutex<HashMap<(u32,u32),SocketAddr>>>
+    readers: Arc<Mutex<HashMap<(u32,u32),SocketAddr>>>,
+    pub cmd_args: Vec<String>
+
 
 }
 
@@ -40,6 +42,7 @@ impl HeimdallrClient
         let mut partition = "".to_string();
         let mut size: u32 = 0;
         let mut node = "".to_string();
+        let mut cmd_args = Vec::<String>::new();
 
         while let Some(arg) = args.next()
         {
@@ -76,6 +79,14 @@ impl HeimdallrClient
                         Some(jn) => jn,
                         None => return Err("Error in setting job-name."),
                     };
+                },
+                "--args" =>
+                {
+                    while let Some(a) = args.next()
+                    {
+                        cmd_args.push(a);
+                    }
+                    break;
                 },
                 _ => (),
             };
@@ -116,7 +127,7 @@ impl HeimdallrClient
         
         let client = HeimdallrClient {job, size, id:daemon_reply.id,
             listener, client_listeners: daemon_reply.client_listeners,
-            daemon_addr: daemon_config.client_addr, readers};
+            daemon_addr: daemon_config.client_addr, readers, cmd_args};
 
         client.listener_handler();
 
@@ -139,6 +150,8 @@ impl HeimdallrClient
                             let reader = BufReader::new(stream);
                             let mut de = serde_json::Deserializer::from_reader(reader);
                             let op_pkt = ClientOperationPkt::deserialize(&mut de).unwrap();
+                            // println!("METADATA RECEIVED");
+                            // println!("  PENDING:{}, {}", op_pkt.client_id, op_pkt.op_id);
                             let mut r = readers.lock().unwrap();
                             // TODO check that no such entry already exists and handle
                             // that case
@@ -156,6 +169,7 @@ impl HeimdallrClient
     pub fn send<T>(&self, data: &T, dest: u32, id: u32) -> Result<(), &'static str>
         where T: Serialize,
     {
+        // println!("send function entry");
         let mut stream = client_connect(self.client_listeners.get(dest as usize).unwrap()).unwrap();
 
         let ip = self.listener.local_addr().unwrap().ip();
@@ -164,17 +178,22 @@ impl HeimdallrClient
         let op_msg = serde_json::to_string(&op_pkt).unwrap();
         stream.write(op_msg.as_bytes()).unwrap();
         stream.flush().unwrap();
+        // println!("  metadata sent");
 
         let (mut stream2, _) = op_listener.accept().unwrap();
         let msg = serde_json::to_string(data).unwrap();
         stream2.write(msg.as_bytes()).unwrap();
+        stream.flush().unwrap();
         
+        // println!("send function exit");
         Ok(())
     }
 
     pub fn receive<'a, T>(&self, source: u32, id: u32) -> Result<T, &'static str>
         where T: Deserialize<'a>,
     {
+        // println!("receive function entry");
+        // println!(" LOOKING FOR: {}, {}", source, id);
         loop
         {
             let mut r = self.readers.lock().unwrap();
@@ -183,10 +202,12 @@ impl HeimdallrClient
             {
                 Some(a) =>
                 {
+                    // println!("  found metadata");
                     let stream = TcpStream::connect(a).unwrap();
-                    let reader = BufReader::new(stream);
+                    let reader = BufReader::new(&stream);
                     let mut de = serde_json::Deserializer::from_reader(reader);
                     let data = T::deserialize(&mut de).unwrap();
+                    // println!("receive function exit");
                     return Ok(data);
                 },
                 None => continue,
@@ -194,7 +215,47 @@ impl HeimdallrClient
         }
     }
 
-    pub fn send_async<T>(&self, data: T, dest: u32, id: u32) -> Result<AsyncSend<T>, &'static str>
+    pub fn receive_any_source<'a, T>(&self, id: u32) -> Result<T, &'static str>
+        where T: Deserialize<'a>,
+    {
+        loop
+        {
+            let mut r = self.readers.lock().unwrap();
+            let mut key: Option<(u32,u32)> = None;
+            for k in r.keys()
+            {
+                if k.1 == id 
+                {
+                    key = Some(k.clone());
+                    break;
+                }
+            }
+
+            match key
+            {
+                Some(k) =>
+                {
+                    let addr = r.remove(&k);
+                    match addr
+                    {
+                        Some(a) =>
+                        {
+                            let stream = TcpStream::connect(a).unwrap();
+                            let reader = BufReader::new(stream);
+                            let mut de = serde_json::Deserializer::from_reader(reader);
+                            let data = T::deserialize(&mut de).unwrap();
+                            return Ok(data);
+                        },
+                        None => continue,
+                    }
+                },
+                None => (),
+            }
+        }
+    }
+
+
+    pub fn send_nb<T>(&self, data: T, dest: u32, id: u32) -> Result<NbDataHandle<T>, &'static str>
         where T: Serialize + std::marker::Send + 'static,
     {
         let dest_addr = self.client_listeners.get(dest as usize).unwrap().clone();
@@ -213,14 +274,15 @@ impl HeimdallrClient
                 let (mut stream2, _) = op_listener.accept().unwrap();
                 let msg = serde_json::to_string(&data).unwrap();
                 stream2.write(msg.as_bytes()).unwrap();
+                stream2.flush().unwrap();
 
                 data
             });
         
-        Ok(AsyncSend::<T>::new(t))
+        Ok(NbDataHandle::<T>::new(t))
     }
 
-    pub fn receive_async<'a, T>(&self, source: u32, id: u32) -> Result<AsyncReceive<T>, &'static str>
+    pub fn receive_nb<'a, T>(&self, source: u32, id: u32) -> Result<NbDataHandle<T>, &'static str>
         where T: Deserialize<'a> + std::marker::Send + 'static,
     {
         let readers = Arc::clone(&self.readers);
@@ -246,7 +308,7 @@ impl HeimdallrClient
                 }
             });
 
-        Ok(AsyncReceive::<T>::new(t))
+        Ok(NbDataHandle::<T>::new(t))
     }
 
 
@@ -254,6 +316,18 @@ impl HeimdallrClient
         where T: Serialize + Deserialize<'a>,
     {
         HeimdallrMutex::<T>::new(&self, name, start_data)
+    }
+
+
+    pub fn barrier(&self) -> Result<(), &'static str>
+    {
+        // println!("barrier function entry");
+        let pkt = BarrierPkt::new(self.id, self.size);
+        let mut stream = TcpStream::connect(&self.daemon_addr).unwrap();
+        pkt.send(&self.job, &mut stream).unwrap();
+        BarrierReplyPkt::receive(&stream);
+        // println!("barrier function exit");
+        Ok(())
     }
 }
 
@@ -266,17 +340,17 @@ impl fmt::Display for HeimdallrClient
     }
 }
 
-
-pub struct AsyncSend<T>
+#[derive(Debug)]
+pub struct NbDataHandle<T>
 {
     t: thread::JoinHandle<T>
 }
 
-impl<T> AsyncSend<T>
+impl<T> NbDataHandle<T>
 {
-    pub fn new(t: thread::JoinHandle<T>) -> AsyncSend<T>
+    pub fn new(t: thread::JoinHandle<T>) -> NbDataHandle<T>
     {
-        AsyncSend::<T>{t}
+        NbDataHandle::<T>{t}
     }
 
     pub fn data(self) -> T
@@ -287,16 +361,36 @@ impl<T> AsyncSend<T>
 }
 
 
-pub struct AsyncReceive<T>
+pub struct NbSend<T>
+{
+    t: thread::JoinHandle<T>
+}
+
+impl<T> NbSend<T>
+{
+    pub fn new(t: thread::JoinHandle<T>) -> NbSend<T>
+    {
+        NbSend::<T>{t}
+    }
+
+    pub fn data(self) -> T
+    {
+        let data = self.t.join().unwrap();
+        data
+    }
+}
+
+
+pub struct NbReceive<T>
 {
     t: thread::JoinHandle<T>,
 }
 
-impl<T> AsyncReceive<T>
+impl<T> NbReceive<T>
 {
-    pub fn new(t: thread::JoinHandle<T>) -> AsyncReceive<T>
+    pub fn new(t: thread::JoinHandle<T>) -> NbReceive<T>
     {
-        AsyncReceive::<T>{t}
+        NbReceive::<T>{t}
     }
 
     pub fn data(self) -> T
@@ -312,6 +406,7 @@ pub struct HeimdallrMutex<T>
     name: String,
     job: String,
     daemon_addr: SocketAddr,
+    client_addr: SocketAddr,
     data: T,
 }
 
@@ -320,6 +415,7 @@ impl<'a, T> HeimdallrMutex<T>
 {
     pub fn new(client: &HeimdallrClient, name: String,  start_value: T) -> HeimdallrMutex<T>
     {
+        // println!("mutex::new function entry");
         let ser_data = serde_json::to_string(&start_value).unwrap();
         let pkt = MutexCreationPkt::new(name.clone(), client.id, ser_data);
         let stream = TcpStream::connect(client.daemon_addr).unwrap();
@@ -333,29 +429,71 @@ impl<'a, T> HeimdallrMutex<T>
             eprintln!("Error: miscommunication in mutex creation. Name mismatch");
         }
 
+        // println!("mutex::new function exit");
         HeimdallrMutex::<T>{name, job: client.job.clone(), daemon_addr: client.daemon_addr,
-            data: start_value}
+            client_addr: client.listener.local_addr().unwrap(),data: start_value}
     }
+
+    // pub fn lock(&'a mut self) -> std::io::Result<HeimdallrMutexDataHandle::<'a,T>>
+    // {
+    //     println!("lock function entry");
+    //     let mut stream = TcpStream::connect(self.daemon_addr)?;
+    //     let lock_req_pkt = MutexLockReqPkt::new(&self.name);
+    //     lock_req_pkt.send(&self.job, &mut stream)?;
+    //
+    //     let mut de = serde_json::Deserializer::from_reader(stream);
+    //     self.data = T::deserialize(&mut de).unwrap();
+    //
+    //     println!("lock function exit");
+    //     Ok(HeimdallrMutexDataHandle::<T>::new(self))
+    // }
 
     pub fn lock(&'a mut self) -> std::io::Result<HeimdallrMutexDataHandle::<'a,T>>
     {
+        // println!("lock function entry");
         let mut stream = TcpStream::connect(self.daemon_addr)?;
-        let lock_req_pkt = MutexLockReqPkt::new(&self.name);
+        let ip = self.client_addr.ip();
+        let op_listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
+
+        let lock_req_pkt = MutexLockReqPkt::new(&self.name, op_listener.local_addr().unwrap());
         lock_req_pkt.send(&self.job, &mut stream)?;
 
-        let mut de = serde_json::Deserializer::from_reader(stream);
+
+        let (stream2, _) = op_listener.accept().unwrap();
+        let mut de = serde_json::Deserializer::from_reader(stream2);
         self.data = T::deserialize(&mut de).unwrap();
 
+        // println!("lock function exit");
         Ok(HeimdallrMutexDataHandle::<T>::new(self))
+
+        // let ip = self.listener.local_addr().unwrap().ip();
+        // let self_id = self.id;
+        // let t = thread::spawn(move || 
+        //     {
+        //         let mut stream = client_connect(&dest_addr).unwrap();
+        //         let op_listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
+        //         let op_pkt = ClientOperationPkt{client_id: self_id, op_id: id,
+        //             addr: op_listener.local_addr().unwrap()};   
+        //         let op_msg = serde_json::to_string(&op_pkt).unwrap();
+        //         stream.write(op_msg.as_bytes()).unwrap();
+        //         stream.flush().unwrap();
+        //
+        //         let (mut stream2, _) = op_listener.accept().unwrap();
+        //         let msg = serde_json::to_string(&data).unwrap();
+        //         stream2.write(msg.as_bytes()).unwrap();
+        //         stream2.flush().unwrap();
     }
 
     fn push_data(&self) 
     {
+        // println!("push_data function entry");
         let mut stream = TcpStream::connect(self.daemon_addr).unwrap();
 
         let ser_data = serde_json::to_string(&self.data).unwrap();
         let write_pkt = MutexWriteAndReleasePkt::new(&self.name, ser_data);
         write_pkt.send(&self.job, &mut stream).unwrap();
+        stream.flush().unwrap();
+        // println!("push_data function exit");
     }
 }
 
@@ -422,6 +560,7 @@ pub enum DaemonPktType
     MutexCreationPkt,
     MutexLockReqPkt,
     MutexWriteAndReleasePkt,
+    BarrierPkt,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -463,6 +602,7 @@ impl ClientInfoPkt
             pkt: msg};
         let data = serde_json::to_string(&pkt).unwrap();
         stream.write(data.as_bytes()).unwrap();
+        stream.flush().unwrap();
     }
 }
 
@@ -485,6 +625,7 @@ impl DaemonReplyPkt
     {
         let msg = serde_json::to_string(&self).unwrap();
         stream.write(msg.as_bytes()).unwrap();
+        stream.flush().unwrap();
     }
 
     pub fn receive(stream: &TcpStream) -> DaemonReplyPkt
@@ -520,6 +661,7 @@ impl MutexCreationPkt
 
         let data = serde_json::to_string(&daemon_pkt).unwrap();
         stream.write(data.as_bytes()).unwrap();
+        stream.flush().unwrap();
     }
 }
 
@@ -540,6 +682,7 @@ impl MutexCreationReplyPkt
     {
         let pkt = serde_json::to_string(&self).unwrap();
         stream.write(pkt.as_bytes())?;
+        stream.flush().unwrap();
         Ok(())
     }
 
@@ -555,13 +698,14 @@ impl MutexCreationReplyPkt
 pub struct MutexLockReqPkt
 {
     pub name: String,
+    pub listener_addr: SocketAddr,
 }
 
 impl MutexLockReqPkt
 {
-    pub fn new(name: &str) -> MutexLockReqPkt
+    pub fn new(name: &str,listener_addr: SocketAddr) -> MutexLockReqPkt
     {
-        MutexLockReqPkt{name: name.to_string()}
+        MutexLockReqPkt{name: name.to_string(), listener_addr}
     }
 
     pub fn send(&self, job: &str,  stream: &mut TcpStream) -> std::io::Result<()>
@@ -572,6 +716,7 @@ impl MutexLockReqPkt
 
         let data = serde_json::to_string(&daemon_pkt).unwrap();
         stream.write(data.as_bytes())?;
+        stream.flush().unwrap();
 
         Ok(())
     }
@@ -599,11 +744,67 @@ impl MutexWriteAndReleasePkt
             pkt_type: DaemonPktType::MutexWriteAndReleasePkt, pkt};
         let data = serde_json::to_string(&daemon_pkt).unwrap();
         stream.write(data.as_bytes())?;
+        stream.flush().unwrap();
+        Ok(())
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BarrierPkt
+{
+    pub id: u32,
+    pub size: u32,
+}
+
+impl BarrierPkt
+{
+    pub fn new(id: u32, size: u32) -> BarrierPkt
+    {
+        BarrierPkt {id, size}
+    }
+
+    pub fn send(&self, job: &str, stream: &mut TcpStream) -> std::io::Result<()>
+    {
+        let pkt = serde_json::to_string(&self).unwrap();
+        let daemon_pkt = DaemonPkt{job: job.to_string(),
+            pkt_type: DaemonPktType::BarrierPkt, pkt};
+        let data = serde_json::to_string(&daemon_pkt).unwrap();
+        stream.write(data.as_bytes())?;
+        stream.flush().unwrap();
 
         Ok(())
     }
 
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BarrierReplyPkt
+{
+    pub id: u32,
+}
+
+impl BarrierReplyPkt
+{
+    pub fn new(id: u32) -> BarrierReplyPkt
+    {
+        BarrierReplyPkt {id}
+    }
+
+    pub fn send(self, stream: &mut TcpStream) -> std::io::Result<()>
+    {
+        let pkt = serde_json::to_string(&self).unwrap();
+        stream.write(pkt.as_bytes())?;
+        stream.flush().unwrap();
+        Ok(())
+    }
+
+    pub fn receive(stream: &TcpStream) -> BarrierReplyPkt
+    {
+        let mut de = serde_json::Deserializer::from_reader(stream);
+        BarrierReplyPkt::deserialize(&mut de).unwrap()
+    }
+}
+
 
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -623,7 +824,7 @@ fn connect(addr: SocketAddr) -> TcpStream
             process::exit(1);
         });
 
-    println!("Connected to server at: {}", addr);
+    // println!("Connected to server at: {}", addr);
 
     stream
 }

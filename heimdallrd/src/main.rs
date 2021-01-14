@@ -20,6 +20,8 @@ use heimdallr::MutexCreationPkt;
 use heimdallr::MutexCreationReplyPkt;
 use heimdallr::MutexLockReqPkt;
 use heimdallr::MutexWriteAndReleasePkt;
+use heimdallr::BarrierPkt;
+use heimdallr::BarrierReplyPkt;
 use heimdallr::DaemonReplyPkt;
 use heimdallr::DaemonConfig;
 
@@ -33,6 +35,7 @@ struct Daemon
     client_listener: TcpListener,
     _daemon_listener: TcpListener,
     jobs: HashMap<String, Job>,
+    connection_count: u64,
 }
 
 
@@ -54,8 +57,10 @@ impl Daemon
 
         let jobs = HashMap::<String, Job>::new();
 
+        let connection_count: u64 = 0;
+
         let daemon = Daemon{name, partition, client_addr, daemon_addr,
-                 client_listener, _daemon_listener, jobs};
+                 client_listener, _daemon_listener, jobs, connection_count};
 
         daemon.create_partition_file()?;
 
@@ -95,6 +100,8 @@ impl Daemon
     fn handle_client_connection(&mut self, stream: TcpStream) -> std::io::Result<()>
     {
         println!("New client connected from: {}", stream.peer_addr()?);
+        self.connection_count += 1;
+        println!("CONNECTION COUNT: {}", self.connection_count);
 
         let mut de = serde_json::Deserializer::from_reader(&stream);
         let pkt = DaemonPkt::deserialize(&mut de).unwrap();
@@ -143,7 +150,7 @@ impl Daemon
 
                 match mutex
                 {
-                    Some(m) => m.access_request(stream),
+                    Some(m) => m.access_request(lock_req_pkt.listener_addr),
                     None => eprintln!("Error: the requested mutex was not found."),
                 }
             },
@@ -164,6 +171,21 @@ impl Daemon
                     None => eprintln!("Error: the requested mutex was not found"),
                 }
             },
+            DaemonPktType::BarrierPkt =>
+            {
+                let barrier_pkt = serde_json::from_str::<BarrierPkt>(&pkt.pkt).unwrap();
+                println!("received barrier pkt from client {}", barrier_pkt.id);
+
+                let job = self.jobs.get_mut(&pkt.job).unwrap();
+                let barrier = &mut job.barrier;
+
+                if barrier.size == 0
+                {
+                    barrier.start(barrier_pkt.size);
+                }
+
+                barrier.register_client(stream);
+            },
         }
 
         Ok(())
@@ -178,6 +200,7 @@ struct Job
     clients: Vec<TcpStream>,
     client_listeners: Vec<SocketAddr>,
     mutexes: HashMap::<String, HeimdallrDaemonMutex>,
+    barrier: DaemonBarrier,
 }
 
 impl Job
@@ -187,7 +210,8 @@ impl Job
         let clients = Vec::<TcpStream>::new();
         let client_listeners = Vec::<SocketAddr>::new();
         let mutexes = HashMap::<String, HeimdallrDaemonMutex>::new();
-        Ok(Job {name, size, clients, client_listeners, mutexes})
+        let barrier = DaemonBarrier::new();
+        Ok(Job {name, size, clients, client_listeners, mutexes, barrier})
     }
 }
 
@@ -199,9 +223,9 @@ struct HeimdallrDaemonMutex
     constructed: bool,
     clients: Vec::<TcpStream>,
     data: String,
-    access_queue: VecDeque::<TcpStream>,
+    access_queue: VecDeque::<SocketAddr>,
     locked: bool,
-    current_owner: Option::<TcpStream>,
+    current_owner: Option::<SocketAddr>,
 }
 
 //TODO destroy function
@@ -211,7 +235,7 @@ impl HeimdallrDaemonMutex
     {
         let clients = Vec::<TcpStream>::new();
         let data = start_data;
-        let access_queue = VecDeque::<TcpStream>::new();
+        let access_queue = VecDeque::<SocketAddr>::new();
         
         HeimdallrDaemonMutex{name, size, constructed: false, clients, data, access_queue,
             locked:false, current_owner: None}
@@ -220,6 +244,7 @@ impl HeimdallrDaemonMutex
     // TODO check for duplicate clients?
     pub fn register_client(&mut self, stream: TcpStream)
     {
+        println!("register_client function entry");
         self.clients.push(stream);
 
         if self.clients.len() as u32 == self.size
@@ -232,16 +257,20 @@ impl HeimdallrDaemonMutex
             self.constructed = true;
             println!("Mutex: {} has been created", self.name);
         }
+        println!("register_client function exit");
     }
 
-    pub fn access_request(&mut self, stream: TcpStream)
+    pub fn access_request(&mut self, addr: SocketAddr)
     {
-        self.access_queue.push_back(stream);
+        println!("access_request function entry");
+        self.access_queue.push_back(addr);
         self.grant_next_lock();
+        println!("access_request function exit");
     }
 
     pub fn release_request(&mut self)
     {
+        println!("release_request function entry");
         if self.locked
         {
             self.locked = false;
@@ -252,18 +281,22 @@ impl HeimdallrDaemonMutex
         {
             eprintln!("Error: Release request on Mutex that was not locked");
         }
+        println!("release_request function exit");
     }
 
     fn send_data(&mut self) -> Result<(), &'static str>
     {
-        match &mut self.current_owner
+        println!("send_data function entry");
+        match self.current_owner
         {
-            Some(stream) =>
+            Some(addr) =>
             {
                 println!("  Sending mutex data: {}", self.data);
+                let mut stream = TcpStream::connect(addr).unwrap();
                 stream.write(self.data.as_bytes()).unwrap();
                 stream.flush().unwrap();
                 stream.shutdown(std::net::Shutdown::Both).unwrap();
+                println!("send_data function exit");
                 Ok(())
             },
             None => Err("Error: Mutex has no current valid owner to send data to"),
@@ -272,15 +305,59 @@ impl HeimdallrDaemonMutex
 
     fn grant_next_lock(&mut self)
     {
+        println!("grant_next_lock function entry");
         if (!self.locked) & (!self.access_queue.is_empty())
         {
             self.current_owner = self.access_queue.pop_front();
             self.locked = true;
-            println!("  Ownership of mutex given");
+            println!("Ownership of mutex given");
             self.send_data().unwrap();
+        }
+        println!("grant_next_lock function exit");
+    }
+}
+
+
+struct DaemonBarrier
+{
+    size: u32,
+    clients: Vec::<TcpStream>,
+}
+
+impl DaemonBarrier
+{
+    pub fn new() -> DaemonBarrier
+    {
+        let size = 0;
+        let clients = Vec::<TcpStream>::new();
+        
+        DaemonBarrier {size, clients}
+    }
+
+    pub fn start(&mut self, size: u32)
+    {
+        self.size = size;
+    }
+
+    pub fn register_client(&mut self, stream: TcpStream)
+    {
+        self.clients.push(stream);
+
+        if self.clients.len() as u32 == self.size
+        {
+            for stream in &mut self.clients
+            {
+                let reply_pkt = BarrierReplyPkt::new(self.size);
+                reply_pkt.send(stream).unwrap();
+            }
+            self.size = 0;
+            self.clients = Vec::<TcpStream>::new();
+            println!("Barrier has completed");
         }
     }
 }
+
+
 
 
 fn run(mut daemon: Daemon) -> Result<(), &'static str>
