@@ -410,7 +410,7 @@ impl IndexMut<usize> for PartdiffMatrixCollection
 
 
 
-fn _test() -> std::io::Result<()>
+fn _test1() -> std::io::Result<()>
 {
     let client = HeimdallrClient::init(env::args()).unwrap();
     
@@ -461,6 +461,18 @@ fn _test() -> std::io::Result<()>
     Ok(())
 }
 
+fn _test() -> std::io::Result<()>
+{
+    let client = HeimdallrClient::init(env::args()).unwrap();
+    
+    let v = vec![42.9; 100];
+    let mut v2 = v.clone();
+    v2[10] = 55.55;
+
+    println!("{}, {}", v[10], v2[10]);
+
+    Ok(())
+}
 
 
 fn main() -> std::io::Result<()>
