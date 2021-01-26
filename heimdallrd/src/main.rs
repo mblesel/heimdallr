@@ -22,6 +22,8 @@ use heimdallr::MutexLockReqPkt;
 use heimdallr::MutexWriteAndReleasePkt;
 use heimdallr::BarrierPkt;
 use heimdallr::BarrierReplyPkt;
+use heimdallr::FinalizePkt;
+use heimdallr::FinalizeReplyPkt;
 use heimdallr::DaemonReplyPkt;
 use heimdallr::DaemonConfig;
 
@@ -186,6 +188,21 @@ impl Daemon
 
                 barrier.register_client(stream);
             },
+            DaemonPktType::FinalizePkt =>
+            {
+                let fini_pkt = serde_json::from_str::<FinalizePkt>(&pkt.pkt).unwrap();
+                println!("received finalize pkt from client {}", fini_pkt.id);
+
+                let job = self.jobs.get_mut(&pkt.job).unwrap();
+                let fini = &mut job.finalize;
+
+                if fini.size == 0
+                {
+                    fini.start(fini_pkt.size);
+                }
+
+                fini.register_client(stream);
+            },
         }
 
         Ok(())
@@ -201,6 +218,7 @@ struct Job
     client_listeners: Vec<SocketAddr>,
     mutexes: HashMap::<String, HeimdallrDaemonMutex>,
     barrier: DaemonBarrier,
+    finalize: JobFinalization,
 }
 
 impl Job
@@ -211,7 +229,8 @@ impl Job
         let client_listeners = Vec::<SocketAddr>::new();
         let mutexes = HashMap::<String, HeimdallrDaemonMutex>::new();
         let barrier = DaemonBarrier::new();
-        Ok(Job {name, size, clients, client_listeners, mutexes, barrier})
+        let finalize = JobFinalization::new();
+        Ok(Job {name, size, clients, client_listeners, mutexes, barrier, finalize})
     }
 }
 
@@ -353,6 +372,44 @@ impl DaemonBarrier
             self.size = 0;
             self.clients = Vec::<TcpStream>::new();
             println!("Barrier has completed");
+        }
+    }
+}
+
+struct JobFinalization
+{
+    size: u32,
+    clients: Vec::<TcpStream>,
+}
+
+impl JobFinalization
+{
+    pub fn new() -> JobFinalization
+    {
+        let size = 0;
+        let clients = Vec::<TcpStream>::new();
+
+        JobFinalization {size, clients}
+    }
+
+    pub fn start(&mut self, size: u32)
+    {
+        self.size = size;
+    }
+
+    pub fn register_client(&mut self, stream: TcpStream)
+    {
+        self.clients.push(stream);
+
+        if self.clients.len() as u32 == self.size
+        {
+            for stream in &mut self.clients
+            {
+                let reply_pkt = FinalizeReplyPkt::new(self.size);
+                reply_pkt.send(stream).unwrap();
+            }
+            println!("Job finalization done.");
+            process::exit(1);
         }
     }
 }

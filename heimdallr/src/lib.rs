@@ -340,6 +340,21 @@ impl fmt::Display for HeimdallrClient
     }
 }
 
+impl<'a> Drop for HeimdallrClient
+{
+    fn drop(&mut self)
+    {
+        let mut stream = TcpStream::connect(self.daemon_addr).unwrap();
+
+        let finalize_pkt = FinalizePkt::new(self.id, self.size);
+        finalize_pkt.send(&self.job, &mut stream).unwrap();
+        stream.flush().unwrap();
+        FinalizeReplyPkt::receive(&stream);
+        println!("Client finalized");
+    }
+}
+
+
 #[derive(Debug)]
 pub struct NbDataHandle<T>
 {
@@ -561,6 +576,7 @@ pub enum DaemonPktType
     MutexLockReqPkt,
     MutexWriteAndReleasePkt,
     BarrierPkt,
+    FinalizePkt,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -802,6 +818,62 @@ impl BarrierReplyPkt
     {
         let mut de = serde_json::Deserializer::from_reader(stream);
         BarrierReplyPkt::deserialize(&mut de).unwrap()
+    }
+}
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FinalizePkt
+{
+    pub id: u32,
+    pub size: u32
+}
+
+impl FinalizePkt
+{
+    pub fn new(id: u32, size: u32) -> FinalizePkt
+    {
+        FinalizePkt {id, size}
+    }
+
+    pub fn send(&self, job: &str, stream: &mut TcpStream) -> std::io::Result<()>
+    {
+        let pkt = serde_json::to_string(&self).unwrap();
+        let daemon_pkt = DaemonPkt{job: job.to_string(),
+            pkt_type: DaemonPktType::FinalizePkt, pkt};
+        let data = serde_json::to_string(&daemon_pkt).unwrap();
+        stream.write(data.as_bytes())?;
+        stream.flush().unwrap();
+
+        Ok(())
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FinalizeReplyPkt
+{
+    pub id: u32,
+}
+
+impl FinalizeReplyPkt
+{
+    pub fn new(id: u32) -> FinalizeReplyPkt
+    {
+        FinalizeReplyPkt {id}
+    }
+
+    pub fn send(self, stream: &mut TcpStream) -> std::io::Result<()>
+    {
+        let pkt = serde_json::to_string(&self).unwrap();
+        stream.write(pkt.as_bytes())?;
+        stream.flush().unwrap();
+        Ok(())
+    }
+
+    pub fn receive(stream: &TcpStream) -> FinalizeReplyPkt
+    {
+        let mut de = serde_json::Deserializer::from_reader(stream);
+        FinalizeReplyPkt::deserialize(&mut de).unwrap()
     }
 }
 
