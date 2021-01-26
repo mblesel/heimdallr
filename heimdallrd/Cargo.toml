@@ -11,3 +11,4 @@ heimdallr = {version = "*", path = "../heimdallr"}
 serde = "*"
 serde_json = "*"
 local_ipaddress = "*"
+pnet = "*"

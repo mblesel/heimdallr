@@ -12,6 +12,7 @@ use std::str::FromStr;
 
 use serde::{Serialize, Deserialize};
 use local_ipaddress;
+use pnet::datalink;
 
 pub struct HeimdallrClient
 {
@@ -43,6 +44,7 @@ impl HeimdallrClient
         let mut size: u32 = 0;
         let mut node = "".to_string();
         let mut cmd_args = Vec::<String>::new();
+        let mut interface = String::new();
 
         while let Some(arg) = args.next()
         {
@@ -88,6 +90,14 @@ impl HeimdallrClient
                     }
                     break;
                 },
+                "--interface" =>
+                {
+                    interface = match args.next()
+                    {
+                        Some(i) => i.to_string(),
+                        None => return Err("No valid network interface name given."),
+                    }
+                },
                 _ => (),
             };
         }
@@ -110,11 +120,27 @@ impl HeimdallrClient
         let stream = connect(daemon_config.client_addr);
 
         // Get IP of this node
-        let ip = match local_ipaddress::get()
+        let mut ip = match local_ipaddress::get()
         {
             Some(i) => IpAddr::from_str(&i).unwrap(),
             None => IpAddr::from_str("0.0.0.0").unwrap(),
         };
+
+        if !interface.is_empty()
+        {
+            let interfaces = datalink::interfaces();
+            for i in interfaces
+            {
+                if i.name == interface
+                {
+                    println!("Using specified network interface {} with ip {}", i.name,
+                             i.ips[0]);
+                    ip = i.ips[0].ip();
+
+                }
+            }
+        }
+
         let listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
         
         let client_info = ClientInfoPkt::new(job.clone(), size, listener.local_addr().unwrap());
@@ -350,7 +376,7 @@ impl<'a> Drop for HeimdallrClient
         finalize_pkt.send(&self.job, &mut stream).unwrap();
         stream.flush().unwrap();
         FinalizeReplyPkt::receive(&stream);
-        println!("Client finalized");
+        // println!("Client finalized");
     }
 }
 

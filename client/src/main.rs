@@ -4,6 +4,8 @@ use std::ops::{Index, IndexMut};
 
 use heimdallr::HeimdallrClient;
 
+use gethostname::gethostname;
+
 fn _wait(secs: u64)
 {
     std::thread::sleep(std::time::Duration::from_secs(secs));
@@ -474,12 +476,28 @@ fn _test() -> std::io::Result<()>
     Ok(())
 }
 
+fn _cluster_test() -> std::io::Result<()>
+{
+    let client = HeimdallrClient::init(env::args()).unwrap();
+
+    let hostname = gethostname();
+
+    println!("Client id: {} on host: {:?}\n", client.id, hostname);
+    
+    _test_send_rec(&client, 0, 1);
+    _test_send_rec(&client, 1, 2);
+    _test_send_rec(&client, 2, 3);
+    _test_send_rec(&client, 3, 0);
+
+    Ok(())
+}
+
 
 fn main() -> std::io::Result<()>
 {
     // _mutex_test2()?;   
     // _barrier_test()?;
-    _test()?;
+    _cluster_test()?;
     Ok(())
 }
 

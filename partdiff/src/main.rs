@@ -375,9 +375,9 @@ where U: std::str::FromStr,
 fn ask_params(cmd_args: &Vec::<String>) -> CalculationOptions
 {
     // TODO keep authors of original c version?
-    println!("============================================================");
-    println!("Program for calculation of partial differential equations.  ");
-    println!("============================================================");
+    // println!("============================================================");
+    // println!("Program for calculation of partial differential equations.  ");
+    // println!("============================================================");
     // println!("(c) Dr. Thomas Ludwig, TU München.");
     // println!("    Thomas A. Zochler, TU München.");
     // println!("    Andreas C. Schmidt, TU München.");
@@ -463,8 +463,8 @@ fn init_variables(client: &HeimdallrClient, options: &CalculationOptions) -> (Ca
         to = from + div - 1;
     }
 
-    println!("rank: {}, N-1: {}, from: {}, to: {}, chunk_size: {}", 
-        client.id, n-1, from, to, chunk_size);
+    // println!("rank: {}, N-1: {}, from: {}, to: {}, chunk_size: {}", 
+        // client.id, n-1, from, to, chunk_size);
 
     let arguments = CalculationArguments::new(n, chunk_size as usize, n+1, num_matrices, h);
     let results = CalculationResults::new(0,0,0.0);
@@ -702,7 +702,7 @@ let mut star: f64;
 
     while term_iteration > 0
     {
-        println!("Iteration: {}", results.stat_iteration);
+        // println!("Iteration: {}", results.stat_iteration);
         maxresiduum = 0.0;
 
         if options.termination == TerminationCondition::TermPrec
@@ -981,6 +981,7 @@ fn main()
     }
     else
     {
+        println!("Executing with {} clients", client.size);
         init_matrices_heimdallr(&client, &mut arguments, &options, &process_data);
         let now = Instant::now();
         arguments = calculate_jacobi_heimdallr(&client, arguments, &mut results, &options,

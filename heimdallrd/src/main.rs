@@ -13,6 +13,8 @@ use serde::de::Deserialize;
 
 use local_ipaddress;
 
+use pnet::datalink;
+
 use heimdallr::DaemonPkt;
 use heimdallr::DaemonPktType;
 use heimdallr::ClientInfoPkt;
@@ -43,14 +45,31 @@ struct Daemon
 
 impl Daemon
 {
-    fn new(name: String, partition: String,) -> std::io::Result<Daemon>
+    fn new(name: String, partition: String, interface: String) -> std::io::Result<Daemon>
     {
         // Get IP of this node
-        let ip = match local_ipaddress::get()
+        let mut ip = match local_ipaddress::get()
         {
             Some(i) => IpAddr::from_str(&i).unwrap(),
             None => IpAddr::from_str("0.0.0.0").unwrap(),
         };
+
+        if !interface.is_empty()
+        {
+            let interfaces = datalink::interfaces();
+            for i in interfaces
+            {
+                if i.name == interface
+                {
+                    println!("Using specified network interface {} with ip {}", i.name,
+                             i.ips[0]);
+                    ip = i.ips[0].ip();
+
+                }
+            }
+        }
+
+
         let client_addr = SocketAddr::new(ip, 4664);
         let client_listener = TcpListener::bind(client_addr)?;
 
@@ -437,12 +456,13 @@ fn run(mut daemon: Daemon) -> Result<(), &'static str>
     Ok(())
 }
 
-fn parse_args(mut args: std::env::Args) -> Result<(String, String), &'static str>
+fn parse_args(mut args: std::env::Args) -> Result<(String, String, String), &'static str>
 {
     args.next();
 
     let mut partition = String::new();
     let mut name = String::new();
+    let mut interface = String::new();
 
     while let Some(arg) = args.next()
     {
@@ -464,23 +484,31 @@ fn parse_args(mut args: std::env::Args) -> Result<(String, String), &'static str
                     None => return Err("No valid daemon name given."),
                 };
             },
+            "--interface" =>
+            {
+                interface = match args.next()
+                {
+                    Some(i) => i.to_string(),
+                    None => return Err("No valid network interface name given."),
+                }
+            },
             _ => return Err("Unknown argument error."),
         };
     }
 
-    Ok((name, partition))
+    Ok((name, partition, interface))
 }
 
 
 fn main() 
 {
-    let (name, partition) = parse_args(env::args()).unwrap_or_else(|err|
+    let (name, partition, interface) = parse_args(env::args()).unwrap_or_else(|err|
         {
             eprintln!("Error: Problem parsing arguments: {}", err);
             process::exit(1);
         });
             
-    let daemon = Daemon::new(name, partition).unwrap_or_else(|err|
+    let daemon = Daemon::new(name, partition, interface).unwrap_or_else(|err|
         {
             eprintln!("Error: Could not start daemon correctly: {} \n Shutting down.", err);
             process::exit(1);
