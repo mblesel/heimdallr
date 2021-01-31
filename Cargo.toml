@@ -4,4 +4,5 @@ members = [
     "heimdallrd",
     "client",
     "partdiff",
+    "benchmark",
 ]
