@@ -1,6 +1,6 @@
 use heimdallr::*;
 use std::env;
-use std::time::{Instant,Duration};
+use std::time::Instant;
 
 
 fn main()
