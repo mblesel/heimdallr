@@ -1,11 +1,9 @@
 use std::process;
 use std::collections::HashMap;
-use std::net::{TcpStream, TcpListener};
-use std::net::{SocketAddr,IpAddr};
+use std::net::{TcpStream, TcpListener, SocketAddr, IpAddr};
 use std::io::Write;
 use std::path::Path;
-use std::env;
-use std::fs;
+use std::{env, fs};
 use std::str::FromStr;
 use std::collections::VecDeque;
 
@@ -15,19 +13,8 @@ use local_ipaddress;
 
 use pnet::datalink;
 
-use heimdallr::DaemonPkt;
-use heimdallr::DaemonPktType;
-use heimdallr::ClientInfoPkt;
-use heimdallr::MutexCreationPkt;
-use heimdallr::MutexCreationReplyPkt;
-use heimdallr::MutexLockReqPkt;
-use heimdallr::MutexWriteAndReleasePkt;
-use heimdallr::BarrierPkt;
-use heimdallr::BarrierReplyPkt;
-use heimdallr::FinalizePkt;
-use heimdallr::FinalizeReplyPkt;
-use heimdallr::DaemonReplyPkt;
 use heimdallr::DaemonConfig;
+use heimdallr::networking::*;
 
 
 struct Daemon
