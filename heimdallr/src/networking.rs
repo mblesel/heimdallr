@@ -20,7 +20,7 @@ pub struct DaemonPkt
 {
     pub job: String,
     pub pkt_type: DaemonPktType,
-    pub pkt: String,
+    pub pkt: Vec<u8>,
 }
 
 impl DaemonPkt
@@ -49,11 +49,11 @@ impl ClientInfoPkt
 
     pub fn send(&self, mut stream: &TcpStream)
     {
-        let msg = serde_json::to_string(&self).unwrap();
+        let msg = bincode::serialize(self).unwrap();
         let pkt = DaemonPkt{job: self.job.clone(), pkt_type: DaemonPktType::ClientInfoPkt,
             pkt: msg};
-        let data = serde_json::to_string(&pkt).unwrap();
-        stream.write(data.as_bytes()).unwrap();
+        let data = bincode::serialize(&pkt).unwrap();
+        stream.write(data.as_slice()).unwrap();
         stream.flush().unwrap();
     }
 }
@@ -75,15 +75,14 @@ impl DaemonReplyPkt
 
     pub fn send(&self, mut stream: &TcpStream)
     {
-        let msg = serde_json::to_string(&self).unwrap();
-        stream.write(msg.as_bytes()).unwrap();
+        let msg = bincode::serialize(self).unwrap();
+        stream.write(msg.as_slice()).unwrap();
         stream.flush().unwrap();
     }
 
     pub fn receive(stream: &TcpStream) -> DaemonReplyPkt
     {
-        let mut de = serde_json::Deserializer::from_reader(stream);
-        let daemon_reply = DaemonReplyPkt::deserialize(&mut de).unwrap();
+        let daemon_reply: DaemonReplyPkt = bincode::deserialize_from(stream).unwrap();
 
         daemon_reply
     }
@@ -95,24 +94,24 @@ pub struct MutexCreationPkt
 {
     pub name: String,
     pub client_id: u32,
-    pub start_data: String,
+    pub start_data: Vec<u8>,
 }
 
 impl MutexCreationPkt
 {
-    pub fn new(name: String, id: u32, serialized_data: String) -> MutexCreationPkt
+    pub fn new(name: String, id: u32, serialized_data: Vec<u8>) -> MutexCreationPkt
     {
         MutexCreationPkt{name, client_id: id, start_data: serialized_data}
     }
 
     pub fn send(&self, client: &HeimdallrClient, mut stream: &TcpStream)
     {
-        let pkt = serde_json::to_string(self).unwrap();
+        let pkt = bincode::serialize(self).unwrap();
         let daemon_pkt = DaemonPkt{ job: client.job.clone(),
             pkt_type: DaemonPktType::MutexCreationPkt, pkt};
 
-        let data = serde_json::to_string(&daemon_pkt).unwrap();
-        stream.write(data.as_bytes()).unwrap();
+        let data = bincode::serialize(&daemon_pkt).unwrap();
+        stream.write(data.as_slice()).unwrap();
         stream.flush().unwrap();
     }
 }
@@ -132,16 +131,15 @@ impl MutexCreationReplyPkt
 
     pub fn send(self, stream: &mut TcpStream) -> std::io::Result<()>
     {
-        let pkt = serde_json::to_string(&self).unwrap();
-        stream.write(pkt.as_bytes())?;
+        let pkt = bincode::serialize(&self).unwrap();
+        stream.write(pkt.as_slice()).unwrap();
         stream.flush().unwrap();
         Ok(())
     }
 
     pub fn receive(stream: &TcpStream) -> MutexCreationReplyPkt
     {
-        let mut de = serde_json::Deserializer::from_reader(stream);
-        MutexCreationReplyPkt::deserialize(&mut de).unwrap()
+        bincode::deserialize_from(stream).unwrap()
     }
 }
 
@@ -162,12 +160,12 @@ impl MutexLockReqPkt
 
     pub fn send(&self, job: &str,  stream: &mut TcpStream) -> std::io::Result<()>
     {
-        let pkt = serde_json::to_string(&self).unwrap();
+        let pkt = bincode::serialize(self).unwrap();
         let daemon_pkt = DaemonPkt{ job: job.to_string(),
             pkt_type: DaemonPktType::MutexLockReqPkt, pkt};
 
-        let data = serde_json::to_string(&daemon_pkt).unwrap();
-        stream.write(data.as_bytes())?;
+        let data = bincode::serialize(&daemon_pkt).unwrap();
+        stream.write(data.as_slice()).unwrap();
         stream.flush().unwrap();
 
         Ok(())
@@ -179,23 +177,23 @@ impl MutexLockReqPkt
 pub struct MutexWriteAndReleasePkt
 {
     pub mutex_name: String,
-    pub data: String,
+    pub data: Vec<u8>,
 }
 
 impl MutexWriteAndReleasePkt
 {
-    pub fn new(mutex_name: &str, data: String) -> MutexWriteAndReleasePkt
+    pub fn new(mutex_name: &str, data: Vec<u8>) -> MutexWriteAndReleasePkt
     {
         MutexWriteAndReleasePkt{mutex_name: mutex_name.to_string(), data}
     }
 
     pub fn send(&self, job: &str, stream: &mut TcpStream) -> std::io::Result<()>
     {
-        let pkt = serde_json::to_string(&self).unwrap();
+        let pkt = bincode::serialize(self).unwrap();
         let daemon_pkt = DaemonPkt{job: job.to_string(),
             pkt_type: DaemonPktType::MutexWriteAndReleasePkt, pkt};
-        let data = serde_json::to_string(&daemon_pkt).unwrap();
-        stream.write(data.as_bytes())?;
+        let data = bincode::serialize(&daemon_pkt).unwrap();
+        stream.write(data.as_slice()).unwrap();
         stream.flush().unwrap();
         Ok(())
     }
@@ -217,11 +215,11 @@ impl BarrierPkt
 
     pub fn send(&self, job: &str, stream: &mut TcpStream) -> std::io::Result<()>
     {
-        let pkt = serde_json::to_string(&self).unwrap();
+        let pkt = bincode::serialize(self).unwrap();
         let daemon_pkt = DaemonPkt{job: job.to_string(),
             pkt_type: DaemonPktType::BarrierPkt, pkt};
-        let data = serde_json::to_string(&daemon_pkt).unwrap();
-        stream.write(data.as_bytes())?;
+        let data = bincode::serialize(&daemon_pkt).unwrap();
+        stream.write(data.as_slice()).unwrap();
         stream.flush().unwrap();
 
         Ok(())
@@ -244,16 +242,15 @@ impl BarrierReplyPkt
 
     pub fn send(self, stream: &mut TcpStream) -> std::io::Result<()>
     {
-        let pkt = serde_json::to_string(&self).unwrap();
-        stream.write(pkt.as_bytes())?;
+        let pkt = bincode::serialize(&self).unwrap();
+        stream.write(pkt.as_slice()).unwrap();
         stream.flush().unwrap();
         Ok(())
     }
 
     pub fn receive(stream: &TcpStream) -> BarrierReplyPkt
     {
-        let mut de = serde_json::Deserializer::from_reader(stream);
-        BarrierReplyPkt::deserialize(&mut de).unwrap()
+        bincode::deserialize_from(stream).unwrap()
     }
 }
 
@@ -274,11 +271,11 @@ impl FinalizePkt
 
     pub fn send(&self, job: &str, stream: &mut TcpStream) -> std::io::Result<()>
     {
-        let pkt = serde_json::to_string(&self).unwrap();
+        let pkt = bincode::serialize(self).unwrap();
         let daemon_pkt = DaemonPkt{job: job.to_string(),
             pkt_type: DaemonPktType::FinalizePkt, pkt};
-        let data = serde_json::to_string(&daemon_pkt).unwrap();
-        stream.write(data.as_bytes())?;
+        let data = bincode::serialize(&daemon_pkt).unwrap();
+        stream.write(data.as_slice()).unwrap();
         stream.flush().unwrap();
 
         Ok(())
@@ -300,16 +297,15 @@ impl FinalizeReplyPkt
 
     pub fn send(self, stream: &mut TcpStream) -> std::io::Result<()>
     {
-        let pkt = serde_json::to_string(&self).unwrap();
-        stream.write(pkt.as_bytes())?;
+        let pkt = bincode::serialize(&self).unwrap();
+        stream.write(pkt.as_slice()).unwrap();
         stream.flush().unwrap();
         Ok(())
     }
 
     pub fn receive(stream: &TcpStream) -> FinalizeReplyPkt
     {
-        let mut de = serde_json::Deserializer::from_reader(stream);
-        FinalizeReplyPkt::deserialize(&mut de).unwrap()
+        bincode::deserialize_from(stream).unwrap()
     }
 }
 

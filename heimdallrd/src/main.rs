@@ -7,10 +7,7 @@ use std::{env, fs};
 use std::str::FromStr;
 use std::collections::VecDeque;
 
-use serde::de::Deserialize;
-
 use local_ipaddress;
-
 use pnet::datalink;
 
 use heimdallr::DaemonConfig;
@@ -111,8 +108,7 @@ impl Daemon
         self.connection_count += 1;
         println!("CONNECTION COUNT: {}", self.connection_count);
 
-        let mut de = serde_json::Deserializer::from_reader(&stream);
-        let pkt = DaemonPkt::deserialize(&mut de).unwrap();
+        let pkt: DaemonPkt = bincode::deserialize_from(&stream).unwrap();
 
         println!("  Pkt type: {:?}", pkt.pkt_type);
 
@@ -120,7 +116,9 @@ impl Daemon
         {
             DaemonPktType::ClientInfoPkt =>
             {
-                let client_info = serde_json::from_str::<ClientInfoPkt>(&pkt.pkt).unwrap();
+                // WIP
+                // let client_info = serde_json::from_str::<ClientInfoPkt>(&pkt.pkt).unwrap();
+                let client_info: ClientInfoPkt = bincode::deserialize(&pkt.pkt).unwrap();
 
                 let job = self.jobs.entry(client_info.job.clone())
                     .or_insert(Job::new(client_info.job, client_info.size).unwrap());
@@ -141,7 +139,7 @@ impl Daemon
             },
             DaemonPktType::MutexCreationPkt =>
             {
-                let mutex_pkt = serde_json::from_str::<MutexCreationPkt>(&pkt.pkt).unwrap();
+                let mutex_pkt: MutexCreationPkt = bincode::deserialize(&pkt.pkt).unwrap();
 
                 let job = self.jobs.get_mut(&pkt.job).unwrap();
                 let mutex = job.mutexes.entry(mutex_pkt.name.clone())
@@ -151,7 +149,7 @@ impl Daemon
             },
             DaemonPktType::MutexLockReqPkt =>
             {
-                let lock_req_pkt = serde_json::from_str::<MutexLockReqPkt>(&pkt.pkt).unwrap();
+                let lock_req_pkt: MutexLockReqPkt = bincode::deserialize(&pkt.pkt).unwrap();
 
                 let job = self.jobs.get_mut(&pkt.job).unwrap();
                 let mutex = job.mutexes.get_mut(&lock_req_pkt.name);
@@ -164,7 +162,7 @@ impl Daemon
             },
             DaemonPktType::MutexWriteAndReleasePkt =>
             {
-                let write_pkt = serde_json::from_str::<MutexWriteAndReleasePkt>(&pkt.pkt).unwrap();
+                let write_pkt: MutexWriteAndReleasePkt = bincode::deserialize(&pkt.pkt).unwrap();
 
                 let job = self.jobs.get_mut(&pkt.job).unwrap();
                 let mutex = job.mutexes.get_mut(&write_pkt.mutex_name);
@@ -181,7 +179,7 @@ impl Daemon
             },
             DaemonPktType::BarrierPkt =>
             {
-                let barrier_pkt = serde_json::from_str::<BarrierPkt>(&pkt.pkt).unwrap();
+                let barrier_pkt: BarrierPkt = bincode::deserialize(&pkt.pkt).unwrap();
                 println!("received barrier pkt from client {}", barrier_pkt.id);
 
                 let job = self.jobs.get_mut(&pkt.job).unwrap();
@@ -196,7 +194,7 @@ impl Daemon
             },
             DaemonPktType::FinalizePkt =>
             {
-                let fini_pkt = serde_json::from_str::<FinalizePkt>(&pkt.pkt).unwrap();
+                let fini_pkt: FinalizePkt = bincode::deserialize(&pkt.pkt).unwrap();
                 println!("received finalize pkt from client {}", fini_pkt.id);
 
                 let job = self.jobs.get_mut(&pkt.job).unwrap();
@@ -247,7 +245,7 @@ struct HeimdallrDaemonMutex
     size: u32,
     constructed: bool,
     clients: Vec::<TcpStream>,
-    data: String,
+    data: Vec<u8>,
     access_queue: VecDeque::<SocketAddr>,
     locked: bool,
     current_owner: Option::<SocketAddr>,
@@ -256,7 +254,7 @@ struct HeimdallrDaemonMutex
 //TODO destroy function
 impl HeimdallrDaemonMutex
 {
-    pub fn new(name: String, size: u32, start_data: String) -> HeimdallrDaemonMutex
+    pub fn new(name: String, size: u32, start_data: Vec<u8>) -> HeimdallrDaemonMutex
     {
         let clients = Vec::<TcpStream>::new();
         let data = start_data;
@@ -316,9 +314,9 @@ impl HeimdallrDaemonMutex
         {
             Some(addr) =>
             {
-                println!("  Sending mutex data: {}", self.data);
+                println!("  Sending mutex data: {:?}", self.data);
                 let mut stream = TcpStream::connect(addr).unwrap();
-                stream.write(self.data.as_bytes()).unwrap();
+                stream.write(self.data.as_slice()).unwrap();
                 stream.flush().unwrap();
                 stream.shutdown(std::net::Shutdown::Both).unwrap();
                 println!("send_data function exit");

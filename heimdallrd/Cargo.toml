@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 heimdallr = {version = "*", path = "../heimdallr"}
 serde = "*"
+bincode="*"
 serde_json = "*"
 local_ipaddress = "*"
 pnet = "*"
