@@ -26,8 +26,9 @@ pub struct DaemonPkt
 impl DaemonPkt
 {
     // TODO make generic constructor
-    pub fn new()
+    pub fn send<T>(pkt: T)
     {
+
     }
 }
 
