@@ -120,7 +120,7 @@ impl HeimdallrClient
         // let daemon_config = DaemonConfig::deserialize(&content).unwrap();
 
 
-        let stream = TcpStream::connect(daemon_config.client_addr).unwrap();
+        let mut stream = TcpStream::connect(daemon_config.client_addr).unwrap();
 
         // Get IP of this node
         let mut ip = match local_ipaddress::get()
@@ -146,8 +146,9 @@ impl HeimdallrClient
 
         let listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
         
-        let client_info = ClientInfoPkt::new(job.clone(), size, listener.local_addr().unwrap());
-        client_info.send(&stream);
+        // TODO WIP
+        let client_info = ClientInfoPkt::new2(&job, size, listener.local_addr().unwrap());
+        client_info.send(&job, &mut stream);
 
         let daemon_reply = DaemonReplyPkt::receive(&stream);
 
@@ -169,29 +170,29 @@ impl HeimdallrClient
         let readers = Arc::clone(&self.readers);
 
         thread::spawn(move || 
+        {
+            for stream in listener.incoming()
             {
-                for stream in listener.incoming()
+                match stream
                 {
-                    match stream
+                    Ok(stream) =>
                     {
-                        Ok(stream) =>
-                        {
-                            let reader = BufReader::new(stream);
-                            let op_pkt: ClientOperationPkt = bincode::deserialize_from(reader).unwrap();
-                            // println!("METADATA RECEIVED");
-                            // println!("  PENDING:{}, {}", op_pkt.client_id, op_pkt.op_id);
-                            let mut r = readers.lock().unwrap();
-                            // TODO check that no such entry already exists and handle
-                            // that case
-                            r.insert((op_pkt.client_id, op_pkt.op_id), op_pkt.addr);
-                        },
-                        Err(e) =>
-                        {
-                            eprintln!("Error in daemon listening to incoming connections: {}", e);
-                        }
+                        let reader = BufReader::new(stream);
+                        let op_pkt: ClientOperationPkt = bincode::deserialize_from(reader).unwrap();
+                        // println!("METADATA RECEIVED");
+                        // println!("  PENDING:{}, {}", op_pkt.client_id, op_pkt.op_id);
+                        let mut r = readers.lock().unwrap();
+                        // TODO check that no such entry already exists and handle
+                        // that case
+                        r.insert((op_pkt.client_id, op_pkt.op_id), op_pkt.addr);
+                    },
+                    Err(e) =>
+                    {
+                        eprintln!("Error in daemon listening to incoming connections: {}", e);
                     }
                 }
-            });
+            }
+        });
     }
 
     pub fn send<T>(&self, data: &T, dest: u32, id: u32) -> Result<(), &'static str>
@@ -370,9 +371,9 @@ impl HeimdallrClient
     pub fn barrier(&self) -> Result<(), &'static str>
     {
         // println!("barrier function entry");
-        let pkt = BarrierPkt::new(self.id, self.size);
+        let pkt = BarrierPkt::new2(self.id, self.size);
         let mut stream = TcpStream::connect(&self.daemon_addr).unwrap();
-        pkt.send(&self.job, &mut stream).unwrap();
+        pkt.send(&self.job, &mut stream);
         BarrierReplyPkt::receive(&stream);
         // println!("barrier function exit");
         Ok(())
@@ -394,8 +395,8 @@ impl Drop for HeimdallrClient
     {
         let mut stream = TcpStream::connect(self.daemon_addr).unwrap();
 
-        let finalize_pkt = FinalizePkt::new(self.id, self.size);
-        finalize_pkt.send(&self.job, &mut stream).unwrap();
+        let finalize_pkt = FinalizePkt::new2(self.id, self.size);
+        finalize_pkt.send(&self.job, &mut stream);
         stream.flush().unwrap();
         FinalizeReplyPkt::receive(&stream);
         // println!("Client finalized");
@@ -480,9 +481,9 @@ impl<'a, T> HeimdallrMutex<T>
     {
         // println!("mutex::new function entry");
         let ser_data = bincode::serialize(&start_value).unwrap();
-        let pkt = MutexCreationPkt::new(name.clone(), client.id, ser_data);
-        let stream = TcpStream::connect(client.daemon_addr).unwrap();
-        pkt.send(&client, &stream);
+        let pkt = MutexCreationPkt::new2(name.clone(), client.id, ser_data);
+        let mut stream = TcpStream::connect(client.daemon_addr).unwrap();
+        pkt.send(&client.job, &mut stream);
 
         let reply = MutexCreationReplyPkt::receive(&stream);
 
@@ -505,8 +506,8 @@ impl<'a, T> HeimdallrMutex<T>
         let ip = self.client_addr.ip();
         let op_listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
 
-        let lock_req_pkt = MutexLockReqPkt::new(&self.name, op_listener.local_addr().unwrap());
-        lock_req_pkt.send(&self.job, &mut stream)?;
+        let lock_req_pkt = MutexLockReqPkt::new2(&self.name, op_listener.local_addr().unwrap());
+        lock_req_pkt.send(&self.job, &mut stream);
 
 
         let (stream2, _) = op_listener.accept().unwrap();
@@ -522,8 +523,8 @@ impl<'a, T> HeimdallrMutex<T>
         let mut stream = TcpStream::connect(self.daemon_addr).unwrap();
 
         let ser_data = bincode::serialize(&self.data).unwrap();
-        let write_pkt = MutexWriteAndReleasePkt::new(&self.name, ser_data);
-        write_pkt.send(&self.job, &mut stream).unwrap();
+        let write_pkt = MutexWriteAndReleasePkt::new2(&self.name, ser_data);
+        write_pkt.send(&self.job, &mut stream);
         stream.flush().unwrap();
         // println!("push_data function exit");
     }

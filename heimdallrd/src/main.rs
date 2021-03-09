@@ -108,17 +108,13 @@ impl Daemon
         self.connection_count += 1;
         println!("CONNECTION COUNT: {}", self.connection_count);
 
-        let pkt: DaemonPkt = bincode::deserialize_from(&stream).unwrap();
+        let pkt: DaemonPkt2 = bincode::deserialize_from(&stream).unwrap();
 
-        println!("  Pkt type: {:?}", pkt.pkt_type);
-
-        match pkt.pkt_type
+        match pkt.pkt
         {
-            DaemonPktType::ClientInfoPkt =>
+            DaemonPktType2::ClientInfo(client_info) =>
             {
-                // WIP
-                // let client_info = serde_json::from_str::<ClientInfoPkt>(&pkt.pkt).unwrap();
-                let client_info: ClientInfoPkt = bincode::deserialize(&pkt.pkt).unwrap();
+                // let client_info: ClientInfoPkt = bincode::deserialize(&pkt.pkt).unwrap();
 
                 let job = self.jobs.entry(client_info.job.clone())
                     .or_insert(Job::new(client_info.job, client_info.size).unwrap());
@@ -137,19 +133,19 @@ impl Daemon
                     }
                 }
             },
-            DaemonPktType::MutexCreationPkt =>
+            DaemonPktType2::MutexCreation(mutex_pkt) =>
             {
-                let mutex_pkt: MutexCreationPkt = bincode::deserialize(&pkt.pkt).unwrap();
+                // let mutex_pkt: MutexCreationPkt = bincode::deserialize(&pkt.pkt).unwrap();
 
                 let job = self.jobs.get_mut(&pkt.job).unwrap();
                 let mutex = job.mutexes.entry(mutex_pkt.name.clone())
                     .or_insert(HeimdallrDaemonMutex::new(mutex_pkt.name.clone(), job.size, mutex_pkt.start_data.clone()));
-                
+
                 mutex.register_client(stream);
             },
-            DaemonPktType::MutexLockReqPkt =>
+            DaemonPktType2::MutexLockReq(lock_req_pkt) =>
             {
-                let lock_req_pkt: MutexLockReqPkt = bincode::deserialize(&pkt.pkt).unwrap();
+                // let lock_req_pkt: MutexLockReqPkt = bincode::deserialize(&pkt.pkt).unwrap();
 
                 let job = self.jobs.get_mut(&pkt.job).unwrap();
                 let mutex = job.mutexes.get_mut(&lock_req_pkt.name);
@@ -160,9 +156,9 @@ impl Daemon
                     None => eprintln!("Error: the requested mutex was not found."),
                 }
             },
-            DaemonPktType::MutexWriteAndReleasePkt =>
+            DaemonPktType2::MutexWriteAndRelease(write_pkt) =>
             {
-                let write_pkt: MutexWriteAndReleasePkt = bincode::deserialize(&pkt.pkt).unwrap();
+                // let write_pkt: MutexWriteAndReleasePkt = bincode::deserialize(&pkt.pkt).unwrap();
 
                 let job = self.jobs.get_mut(&pkt.job).unwrap();
                 let mutex = job.mutexes.get_mut(&write_pkt.mutex_name);
@@ -177,9 +173,9 @@ impl Daemon
                     None => eprintln!("Error: the requested mutex was not found"),
                 }
             },
-            DaemonPktType::BarrierPkt =>
+            DaemonPktType2::Barrier(barrier_pkt) =>
             {
-                let barrier_pkt: BarrierPkt = bincode::deserialize(&pkt.pkt).unwrap();
+                // let barrier_pkt: BarrierPkt = bincode::deserialize(&pkt.pkt).unwrap();
                 println!("received barrier pkt from client {}", barrier_pkt.id);
 
                 let job = self.jobs.get_mut(&pkt.job).unwrap();
@@ -192,9 +188,9 @@ impl Daemon
 
                 barrier.register_client(stream);
             },
-            DaemonPktType::FinalizePkt =>
+            DaemonPktType2::Finalize(fini_pkt) =>
             {
-                let fini_pkt: FinalizePkt = bincode::deserialize(&pkt.pkt).unwrap();
+                // let fini_pkt: FinalizePkt = bincode::deserialize(&pkt.pkt).unwrap();
                 println!("received finalize pkt from client {}", fini_pkt.id);
 
                 let job = self.jobs.get_mut(&pkt.job).unwrap();
@@ -208,6 +204,107 @@ impl Daemon
                 fini.register_client(stream);
             },
         }
+
+        // let pkt: DaemonPkt = bincode::deserialize_from(&stream).unwrap();
+        //
+        // println!("  Pkt type: {:?}", pkt.pkt_type);
+        //
+        // match pkt.pkt_type
+        // {
+        //     DaemonPktType::ClientInfoPkt =>
+        //     {
+        //         // WIP
+        //         // let client_info = serde_json::from_str::<ClientInfoPkt>(&pkt.pkt).unwrap();
+        //         let client_info: ClientInfoPkt = bincode::deserialize(&pkt.pkt).unwrap();
+        //
+        //         let job = self.jobs.entry(client_info.job.clone())
+        //             .or_insert(Job::new(client_info.job, client_info.size).unwrap());
+        //
+        //         job.clients.push(stream);
+        //         job.client_listeners.push(client_info.listener_addr);
+        //
+        //         if job.clients.len() as u32 == (job.size)
+        //         {
+        //             println!("  All {} clients for job: {} have been found.", job.size, job.name);
+        //             for (idx, stream) in job.clients.iter().enumerate()
+        //             {
+        //                 println!("    {} : {}", idx, stream.peer_addr().unwrap());
+        //                 let reply = DaemonReplyPkt::new(idx as u32, &job.client_listeners);
+        //                 reply.send(&stream);
+        //             }
+        //         }
+        //     },
+        //     DaemonPktType::MutexCreationPkt =>
+        //     {
+        //         let mutex_pkt: MutexCreationPkt = bincode::deserialize(&pkt.pkt).unwrap();
+        //
+        //         let job = self.jobs.get_mut(&pkt.job).unwrap();
+        //         let mutex = job.mutexes.entry(mutex_pkt.name.clone())
+        //             .or_insert(HeimdallrDaemonMutex::new(mutex_pkt.name.clone(), job.size, mutex_pkt.start_data.clone()));
+        //         
+        //         mutex.register_client(stream);
+        //     },
+        //     DaemonPktType::MutexLockReqPkt =>
+        //     {
+        //         let lock_req_pkt: MutexLockReqPkt = bincode::deserialize(&pkt.pkt).unwrap();
+        //
+        //         let job = self.jobs.get_mut(&pkt.job).unwrap();
+        //         let mutex = job.mutexes.get_mut(&lock_req_pkt.name);
+        //
+        //         match mutex
+        //         {
+        //             Some(m) => m.access_request(lock_req_pkt.listener_addr),
+        //             None => eprintln!("Error: the requested mutex was not found."),
+        //         }
+        //     },
+        //     DaemonPktType::MutexWriteAndReleasePkt =>
+        //     {
+        //         let write_pkt: MutexWriteAndReleasePkt = bincode::deserialize(&pkt.pkt).unwrap();
+        //
+        //         let job = self.jobs.get_mut(&pkt.job).unwrap();
+        //         let mutex = job.mutexes.get_mut(&write_pkt.mutex_name);
+        //
+        //         match mutex
+        //         {
+        //             Some(m) =>
+        //             {
+        //                 m.data = write_pkt.data;
+        //                 m.release_request();
+        //             },
+        //             None => eprintln!("Error: the requested mutex was not found"),
+        //         }
+        //     },
+        //     DaemonPktType::BarrierPkt =>
+        //     {
+        //         let barrier_pkt: BarrierPkt = bincode::deserialize(&pkt.pkt).unwrap();
+        //         println!("received barrier pkt from client {}", barrier_pkt.id);
+        //
+        //         let job = self.jobs.get_mut(&pkt.job).unwrap();
+        //         let barrier = &mut job.barrier;
+        //
+        //         if barrier.size == 0
+        //         {
+        //             barrier.start(barrier_pkt.size);
+        //         }
+        //
+        //         barrier.register_client(stream);
+        //     },
+        //     DaemonPktType::FinalizePkt =>
+        //     {
+        //         let fini_pkt: FinalizePkt = bincode::deserialize(&pkt.pkt).unwrap();
+        //         println!("received finalize pkt from client {}", fini_pkt.id);
+        //
+        //         let job = self.jobs.get_mut(&pkt.job).unwrap();
+        //         let fini = &mut job.finalize;
+        //
+        //         if fini.size == 0
+        //         {
+        //             fini.start(fini_pkt.size);
+        //         }
+        //
+        //         fini.register_client(stream);
+        //     },
+        // }
 
         Ok(())
     }
