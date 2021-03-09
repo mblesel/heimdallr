@@ -35,11 +35,11 @@ fn _client_test_1() -> std::io::Result<()>
     {
         println!("  id: {}, listener_addr: {}", id, addr);
     }
-    
+
     _test_send_rec(&client, 0, 1);
     _test_send_rec(&client, 1, 2);
     _test_send_rec(&client, 2, 0);
-    
+
     Ok(()) }
 
 fn _big_vec_send_rec() -> std::io::Result<()>
@@ -274,11 +274,40 @@ fn _cluster_test() -> std::io::Result<()>
     let hostname = gethostname();
 
     println!("Client id: {} on host: {:?}\n", client.id, hostname);
-    
+
     _test_send_rec(&client, 0, 1);
     _test_send_rec(&client, 1, 2);
     _test_send_rec(&client, 2, 3);
     _test_send_rec(&client, 3, 0);
+
+    Ok(())
+}
+
+fn _send_slice() -> std::io::Result<()>
+{
+    let client = HeimdallrClient::init(env::args()).unwrap();
+
+    let mut sendbuf = vec![0.0;20];
+    for i in 0..sendbuf.len()
+    {
+        sendbuf[i] = i as f64;
+    }
+    let mut recvbuf = vec![0.0;20];
+
+    match client.id
+    {
+        0 =>
+        {
+            client.send_slice(&sendbuf[10..20], 1, 0).unwrap();
+            println!("SEND BUF: {:?}", sendbuf);
+        },
+        1 => 
+        {
+            recvbuf.splice(0..10, client.receive::<Vec<f64>>(0, 0).unwrap());
+            println!("RECV BUF: {:?}", recvbuf);
+        },
+        _ => (),
+    }
 
     Ok(())
 }
@@ -289,7 +318,7 @@ fn main() -> std::io::Result<()>
 {
     // _mutex_test2()?;   
     // _barrier_test()?;
-    _cluster_test()?;
+    _send_slice()?;
     Ok(())
 }
 

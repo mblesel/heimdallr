@@ -217,6 +217,29 @@ impl HeimdallrClient
         Ok(())
     }
 
+    pub fn send_slice<T>(&self, data: &[T], dest: u32, id: u32) -> Result<(), &'static str>
+        where T: Serialize,
+    {
+        // println!("send function entry");
+        let mut stream = TcpStream::connect(self.client_listeners.get(dest as usize).unwrap()).unwrap();
+
+        let ip = self.listener.local_addr().unwrap().ip();
+        let op_listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
+        let op_pkt = ClientOperationPkt{client_id: self.id, op_id: id, addr: op_listener.local_addr().unwrap()};   
+        let op_msg = bincode::serialize(&op_pkt).unwrap();
+        stream.write(op_msg.as_slice()).unwrap();
+        stream.flush().unwrap();
+        // println!("  metadata sent");
+
+        let (mut stream2, _) = op_listener.accept().unwrap();
+        let msg = bincode::serialize(data).unwrap();
+        stream2.write(msg.as_slice()).unwrap();
+        stream.flush().unwrap();
+        
+        // println!("send function exit");
+        Ok(())
+    }
+
     pub fn receive<'a, T>(&self, source: u32, id: u32) -> Result<T, &'static str>
         // where T: Deserialize<'a> + serde::de::DeserializeOwned,
         where T: serde::de::DeserializeOwned,

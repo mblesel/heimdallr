@@ -126,12 +126,15 @@ impl CalculationArguments
     fn new(n: usize, rows: usize, cols: usize, num_matrices: usize, h: f64) -> CalculationArguments {
         // let mut matrices: Vec<PartdiffMatrix> = Vec::with_capacity(num_matrices);
 
-        let m1 = PartdiffMatrix::new(rows,cols).unwrap();
+        // let m1 = PartdiffMatrix::new(rows,cols).unwrap();
+        let m1 = PartdiffMatrix::new(rows,cols);
 
         let m2 = match num_matrices
         {
-            2 => PartdiffMatrix::new(rows,cols).unwrap(),
-            _ => PartdiffMatrix::new(0,0).unwrap(),
+            // 2 => PartdiffMatrix::new(rows,cols).unwrap(),
+            // _ => PartdiffMatrix::new(0,0).unwrap(),
+            2 => PartdiffMatrix::new(rows,cols),
+            _ => PartdiffMatrix::new(0,0),
         };
 
         CalculationArguments{n, num_matrices, h, m1, m2}
@@ -176,67 +179,6 @@ impl ProcessData
 
 
 
-// // Simple data structure for a 2D matrix
-// // Has an efficient continuous 1D memory layout
-// #[derive(Debug)]
-// struct PartdiffMatrix
-// {
-//     rows: usize,
-//     cols: usize,
-//     matrix: Vec<f64>,
-// }
-//
-// impl PartdiffMatrix
-// {
-//     fn new(rows: usize, cols: usize) -> PartdiffMatrix
-//     {
-//         let matrix = vec![0.0; ((rows)*(cols)) as usize];
-//         PartdiffMatrix{rows, cols, matrix}
-//     }
-//
-//     fn get_line(&self,line: usize) -> Vec::<f64>
-//     {
-//         let mut buf = vec![0.0; self.cols];
-//     
-//         buf[0..self.cols].copy_from_slice(&self.matrix[line * self.cols.. line * self.cols + self.cols]);
-//
-//         buf
-//     }
-// }
-//
-// // Implementation of Index and IndexMut traits for the matrix
-// // 2d-array-indexing allows access to matrix elements with following syntax:
-// //   matrix[[x,y]]
-// //
-// // This version is used if the crate is build with: --features "2d-array-indexing"
-// // 
-// // Also supports switching between indexing with or without bounds checking
-// // This can be set by building the crate with or without: --features "unsafe-indexing"
-// impl Index<[usize; 2]> for PartdiffMatrix
-// {
-//     type Output = f64;
-//
-//     fn index(&self, idx: [usize; 2]) -> &Self::Output
-//     {       
-//         unsafe
-//         {
-//             &self.matrix.get_unchecked(idx[0] * self.cols + idx[1])
-//         }
-//     }
-// }
-//
-// impl IndexMut<[usize; 2]> for PartdiffMatrix
-// {
-//     fn index_mut(&mut self, idx: [usize; 2]) -> &mut Self::Output
-//     {
-//         unsafe
-//         {
-//             self.matrix.get_unchecked_mut(idx[0] * self.cols + idx[1])
-//         }
-//     }
-// }
-
-
 // Simple data structure for a 2D matrix
 // Has an efficient continuous 1D memory layout
 #[derive(Debug)]
@@ -244,39 +186,24 @@ struct PartdiffMatrix
 {
     rows: usize,
     cols: usize,
-    first1: Vec<f64>,
-    first2: Vec<f64>,
     matrix: Vec<f64>,
-    last1: Vec<f64>,
-    last2: Vec<f64>,
 }
 
 impl PartdiffMatrix
 {
-    fn new(rows: usize, cols: usize) -> Result<PartdiffMatrix, &'static str>
+    fn new(rows: usize, cols: usize) -> PartdiffMatrix
     {
-        if (rows == 0) & (cols == 0)
-        {
-            let first1 = Vec::<f64>::new(); 
-            let first2 =  Vec::<f64>::new();
-            let last1 =  Vec::<f64>::new();
-            let last2 =  Vec::<f64>::new();
-            let matrix = Vec::<f64>::new();
+        let matrix = vec![0.0; ((rows)*(cols)) as usize];
+        PartdiffMatrix{rows, cols, matrix}
+    }
 
-            return Ok(PartdiffMatrix{rows, cols, first1, first2, matrix, last1, last2});
-        }
-        else if rows < 5
-        {
-            return Err("Not enough rows");
-        }
+    fn get_line(&self,line: usize) -> Vec::<f64>
+    {
+        let mut buf = vec![0.0; self.cols];
 
-        let first1 = vec![0.0; cols];
-        let first2 = vec![0.0; cols];
-        let last1 = vec![0.0; cols];
-        let last2 = vec![0.0; cols];
-        let matrix = vec![0.0; (rows-4) * cols];
+        buf[0..self.cols].copy_from_slice(&self.matrix[line * self.cols.. line * self.cols + self.cols]);
 
-        Ok(PartdiffMatrix{rows, cols, first1, first2, matrix, last1, last2})
+        buf
     }
 }
 
@@ -296,14 +223,7 @@ impl Index<[usize; 2]> for PartdiffMatrix
     {       
         unsafe
         {
-            match idx[0]
-            {
-                0 => &self.first1.get_unchecked(idx[1]),
-                1 => &self.first2.get_unchecked(idx[1]),
-                x if x == self.rows-2 => &self.last1.get_unchecked(idx[1]),
-                x if x == self.rows-1 => &self.last2.get_unchecked(idx[1]),
-                _ => &self.matrix.get_unchecked((idx[0]-2) * self.cols + idx[1]),
-            }
+            &self.matrix.get_unchecked(idx[0] * self.cols + idx[1])
         }
     }
 }
@@ -314,17 +234,100 @@ impl IndexMut<[usize; 2]> for PartdiffMatrix
     {
         unsafe
         {
-            match idx[0]
-            {
-                0 => self.first1.get_unchecked_mut(idx[1]),
-                1 => self.first2.get_unchecked_mut(idx[1]),
-                x if x == self.rows-2 => self.last1.get_unchecked_mut(idx[1]),
-                x if x == self.rows-1 => self.last2.get_unchecked_mut(idx[1]),
-                _ => self.matrix.get_unchecked_mut((idx[0]-2) * self.cols + idx[1]),
-            }
+            self.matrix.get_unchecked_mut(idx[0] * self.cols + idx[1])
         }
     }
 }
+
+
+// Simple data structure for a 2D matrix
+// Has an efficient continuous 1D memory layout
+// #[derive(Debug)]
+// struct PartdiffMatrix
+// {
+//     rows: usize,
+//     cols: usize,
+//     first1: Vec<f64>,
+//     first2: Vec<f64>,
+//     matrix: Vec<f64>,
+//     last1: Vec<f64>,
+//     last2: Vec<f64>,
+// }
+//
+// impl PartdiffMatrix
+// {
+//     fn new(rows: usize, cols: usize) -> Result<PartdiffMatrix, &'static str>
+//     {
+//         if (rows == 0) & (cols == 0)
+//         {
+//             let first1 = Vec::<f64>::new(); 
+//             let first2 =  Vec::<f64>::new();
+//             let last1 =  Vec::<f64>::new();
+//             let last2 =  Vec::<f64>::new();
+//             let matrix = Vec::<f64>::new();
+//
+//             return Ok(PartdiffMatrix{rows, cols, first1, first2, matrix, last1, last2});
+//         }
+//         else if rows < 5
+//         {
+//             return Err("Not enough rows");
+//         }
+//
+//         let first1 = vec![0.0; cols];
+//         let first2 = vec![0.0; cols];
+//         let last1 = vec![0.0; cols];
+//         let last2 = vec![0.0; cols];
+//         let matrix = vec![0.0; (rows-4) * cols];
+//
+//         Ok(PartdiffMatrix{rows, cols, first1, first2, matrix, last1, last2})
+//     }
+// }
+//
+// // Implementation of Index and IndexMut traits for the matrix
+// // 2d-array-indexing allows access to matrix elements with following syntax:
+// //   matrix[[x,y]]
+// //
+// // This version is used if the crate is build with: --features "2d-array-indexing"
+// // 
+// // Also supports switching between indexing with or without bounds checking
+// // This can be set by building the crate with or without: --features "unsafe-indexing"
+// impl Index<[usize; 2]> for PartdiffMatrix
+// {
+//     type Output = f64;
+//
+//     fn index(&self, idx: [usize; 2]) -> &Self::Output
+//     {       
+//         unsafe
+//         {
+//             match idx[0]
+//             {
+//                 0 => &self.first1.get_unchecked(idx[1]),
+//                 1 => &self.first2.get_unchecked(idx[1]),
+//                 x if x == self.rows-2 => &self.last1.get_unchecked(idx[1]),
+//                 x if x == self.rows-1 => &self.last2.get_unchecked(idx[1]),
+//                 _ => &self.matrix.get_unchecked((idx[0]-2) * self.cols + idx[1]),
+//             }
+//         }
+//     }
+// }
+//
+// impl IndexMut<[usize; 2]> for PartdiffMatrix
+// {
+//     fn index_mut(&mut self, idx: [usize; 2]) -> &mut Self::Output
+//     {
+//         unsafe
+//         {
+//             match idx[0]
+//             {
+//                 0 => self.first1.get_unchecked_mut(idx[1]),
+//                 1 => self.first2.get_unchecked_mut(idx[1]),
+//                 x if x == self.rows-2 => self.last1.get_unchecked_mut(idx[1]),
+//                 x if x == self.rows-1 => self.last2.get_unchecked_mut(idx[1]),
+//                 _ => self.matrix.get_unchecked_mut((idx[0]-2) * self.cols + idx[1]),
+//             }
+//         }
+//     }
+// }
 
 
 // Display help message to show the required command line arguments to run the binary
@@ -716,7 +719,7 @@ let mut star: f64;
         }
 
 
-        let (nb1, nb2);
+        // let (nb1, nb2);
 
         let (mut m_in, mut m_out) = match in_matrix
         {
@@ -726,15 +729,23 @@ let mut star: f64;
         
         if rank < size-1
         {
-            nb1 = client.send_nb(m_in.last1, proc_next as u32, 2).unwrap();
-            m_in.last2 = client.receive(proc_next as u32, 1).unwrap();
-            m_in.last1 = nb1.data();
+            // nb1 = client.send_nb(m_in.last1, proc_next as u32, 2).unwrap();
+            // m_in.last2 = client.receive(proc_next as u32, 1).unwrap();
+            // m_in.last1 = nb1.data();
+            client.send_slice(
+                &m_in.matrix[((m_in.rows-3)*m_in.cols)..((m_in.rows-2)*m_in.cols)],
+                proc_next as u32, 2).unwrap();
+            m_in.matrix.splice(((m_in.rows-2)*m_in.cols)..((m_in.rows-1)*m_in.cols),
+                client.receive::<Vec<f64>>(proc_next as u32, 1).unwrap());
         }
         if rank > 0
         {
-            nb2 = client.send_nb(m_in.first2, proc_before as u32, 1).unwrap();
-            m_in.first1 = client.receive(proc_before as u32, 2).unwrap();
-            m_in.first2 = nb2.data();
+            // nb2 = client.send_nb(m_in.first2, proc_before as u32, 1).unwrap();
+            // m_in.first1 = client.receive(proc_before as u32, 2).unwrap();
+            // m_in.first2 = nb2.data();
+            m_in.matrix.splice(0..(m_in.cols),
+                client.receive::<Vec<f64>>(proc_before as u32, 2).unwrap());
+            client.send_slice(&m_in.matrix[m_in.cols..(2*m_in.cols)], proc_before as u32, 1).unwrap();
         }
 
 
