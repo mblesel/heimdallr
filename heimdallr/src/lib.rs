@@ -240,8 +240,7 @@ impl HeimdallrClient
         Ok(())
     }
 
-    pub fn receive<'a, T>(&self, source: u32, id: u32) -> Result<T, &'static str>
-        // where T: Deserialize<'a> + serde::de::DeserializeOwned,
+    pub fn receive<T>(&self, source: u32, id: u32) -> Result<T, &'static str>
         where T: serde::de::DeserializeOwned,
     {
         // println!("receive function entry");
@@ -266,7 +265,7 @@ impl HeimdallrClient
         }
     }
 
-    pub fn receive_any_source<'a, T>(&self, id: u32) -> Result<T, &'static str>
+    pub fn receive_any_source<T>(&self, id: u32) -> Result<T, &'static str>
         where T: serde::de::DeserializeOwned,
     {
         loop
@@ -306,7 +305,7 @@ impl HeimdallrClient
 
 
     pub fn send_nb<T>(&self, data: T, dest: u32, id: u32) -> Result<NbDataHandle<T>, &'static str>
-        where T: Serialize + std::marker::Send + 'static,
+        where T: Serialize + std::marker::Send + 'static
     {
         let dest_addr = self.client_listeners.get(dest as usize).unwrap().clone();
         let ip = self.listener.local_addr().unwrap().ip();
@@ -332,7 +331,7 @@ impl HeimdallrClient
         Ok(NbDataHandle::<T>::new(t))
     }
 
-    pub fn receive_nb<'a, T>(&self, source: u32, id: u32) -> Result<NbDataHandle<T>, &'static str>
+    pub fn receive_nb<T>(&self, source: u32, id: u32) -> Result<NbDataHandle<T>, &'static str>
         where T: serde::de::DeserializeOwned + std::marker::Send + 'static,
     {
         let readers = Arc::clone(&self.readers);
@@ -361,8 +360,8 @@ impl HeimdallrClient
     }
 
 
-    pub fn create_mutex<'a, T>(&self, name: String, start_data: T) -> HeimdallrMutex<T>
-        where T: Serialize + Deserialize<'a>,
+    pub fn create_mutex<T>(&self, name: String, start_data: T) -> HeimdallrMutex<T>
+        where T: Serialize
     {
         HeimdallrMutex::<T>::new(&self, name, start_data)
     }
@@ -389,7 +388,7 @@ impl fmt::Display for HeimdallrClient
     }
 }
 
-impl<'a> Drop for HeimdallrClient
+impl Drop for HeimdallrClient
 {
     fn drop(&mut self)
     {

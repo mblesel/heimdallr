@@ -197,14 +197,14 @@ impl PartdiffMatrix
         PartdiffMatrix{rows, cols, matrix}
     }
 
-    fn get_line(&self,line: usize) -> Vec::<f64>
-    {
-        let mut buf = vec![0.0; self.cols];
-
-        buf[0..self.cols].copy_from_slice(&self.matrix[line * self.cols.. line * self.cols + self.cols]);
-
-        buf
-    }
+    // fn get_line(&self,line: usize) -> Vec::<f64>
+    // {
+    //     let mut buf = vec![0.0; self.cols];
+    //
+    //     buf[0..self.cols].copy_from_slice(&self.matrix[line * self.cols.. line * self.cols + self.cols]);
+    //
+    //     buf
+    // }
 }
 
 // Implementation of Index and IndexMut traits for the matrix
@@ -733,9 +733,9 @@ let mut star: f64;
             // m_in.last2 = client.receive(proc_next as u32, 1).unwrap();
             // m_in.last1 = nb1.data();
             client.send_slice(
-                &m_in.matrix[((m_in.rows-3)*m_in.cols)..((m_in.rows-2)*m_in.cols)],
+                &m_in.matrix[((m_in.rows-2)*m_in.cols)..((m_in.rows-1)*m_in.cols)],
                 proc_next as u32, 2).unwrap();
-            m_in.matrix.splice(((m_in.rows-2)*m_in.cols)..((m_in.rows-1)*m_in.cols),
+            m_in.matrix.splice(((m_in.rows-1)*m_in.cols)..((m_in.rows)*m_in.cols),
                 client.receive::<Vec<f64>>(proc_next as u32, 1).unwrap());
         }
         if rank > 0

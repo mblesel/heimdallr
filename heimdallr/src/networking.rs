@@ -23,15 +23,6 @@ pub struct DaemonPkt
     pub pkt: Vec<u8>,
 }
 
-impl DaemonPkt
-{
-    // TODO make generic constructor
-    pub fn send<T>(pkt: T)
-    {
-
-    }
-}
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ClientInfoPkt
