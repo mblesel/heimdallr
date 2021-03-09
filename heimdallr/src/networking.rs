@@ -2,36 +2,9 @@ use std::net::{SocketAddr, TcpStream};
 use std::io::{Write};
 use serde::{Serialize, Deserialize};
 
-use super::HeimdallrClient;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum DaemonPktType
-{
-    ClientInfoPkt,
-    MutexCreationPkt,
-    MutexLockReqPkt,
-    MutexWriteAndReleasePkt,
-    BarrierPkt,
-    FinalizePkt,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DaemonPkt
-{
-    pub job: String,
-    pub pkt_type: DaemonPktType,
-    pub pkt: Vec<u8>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DaemonPkt2
-{
-    pub job: String,
-    pub pkt: DaemonPktType2,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub enum DaemonPktType2
 {
     ClientInfo(ClientInfoPkt),
     MutexCreation(MutexCreationPkt),
@@ -41,11 +14,18 @@ pub enum DaemonPktType2
     Finalize(FinalizePkt),
 }
 
-impl DaemonPktType2
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DaemonPkt
+{
+    pub job: String,
+    pub pkt: DaemonPktType,
+}
+
+impl DaemonPktType
 {
     pub fn send(self, job: &str, stream: &mut TcpStream)
     {
-        let daemon_pkt = DaemonPkt2{job: job.to_string(), pkt: self};
+        let daemon_pkt = DaemonPkt{job: job.to_string(), pkt: self};
         let msg = bincode::serialize(&daemon_pkt).unwrap();
         stream.write(msg.as_slice()).unwrap();
         stream.flush().unwrap();
@@ -63,24 +43,9 @@ pub struct ClientInfoPkt
 
 impl ClientInfoPkt
 {
-    pub fn new(job: String, size: u32, listener_addr: SocketAddr) -> ClientInfoPkt
+    pub fn new(job: &str, size: u32, listener_addr: SocketAddr) -> DaemonPktType
     {
-        ClientInfoPkt{job, size, listener_addr}
-    }
-
-    pub fn new2(job: &str, size: u32, listener_addr: SocketAddr) -> DaemonPktType2
-    {
-        DaemonPktType2::ClientInfo(ClientInfoPkt{job: job.to_string(), size, listener_addr})
-    }
-
-    pub fn send(&self, mut stream: &TcpStream)
-    {
-        let msg = bincode::serialize(self).unwrap();
-        let pkt = DaemonPkt{job: self.job.clone(), pkt_type: DaemonPktType::ClientInfoPkt,
-            pkt: msg};
-        let data = bincode::serialize(&pkt).unwrap();
-        stream.write(data.as_slice()).unwrap();
-        stream.flush().unwrap();
+        DaemonPktType::ClientInfo(ClientInfoPkt{job: job.to_string(), size, listener_addr})
     }
 }
 
@@ -125,25 +90,9 @@ pub struct MutexCreationPkt
 
 impl MutexCreationPkt
 {
-    pub fn new(name: String, id: u32, serialized_data: Vec<u8>) -> MutexCreationPkt
+    pub fn new(name: String, id: u32, serialized_data: Vec<u8>) -> DaemonPktType
     {
-        MutexCreationPkt{name, client_id: id, start_data: serialized_data}
-    }
-
-    pub fn new2(name: String, id: u32, serialized_data: Vec<u8>) -> DaemonPktType2
-    {
-        DaemonPktType2::MutexCreation(MutexCreationPkt{name, client_id: id, start_data: serialized_data})
-    }
-
-    pub fn send(&self, client: &HeimdallrClient, mut stream: &TcpStream)
-    {
-        let pkt = bincode::serialize(self).unwrap();
-        let daemon_pkt = DaemonPkt{ job: client.job.clone(),
-            pkt_type: DaemonPktType::MutexCreationPkt, pkt};
-
-        let data = bincode::serialize(&daemon_pkt).unwrap();
-        stream.write(data.as_slice()).unwrap();
-        stream.flush().unwrap();
+        DaemonPktType::MutexCreation(MutexCreationPkt{name, client_id: id, start_data: serialized_data})
     }
 }
 
@@ -184,27 +133,9 @@ pub struct MutexLockReqPkt
 
 impl MutexLockReqPkt
 {
-    pub fn new(name: &str,listener_addr: SocketAddr) -> MutexLockReqPkt
+    pub fn new(name: &str,listener_addr: SocketAddr) -> DaemonPktType
     {
-        MutexLockReqPkt{name: name.to_string(), listener_addr}
-    }
-
-    pub fn new2(name: &str,listener_addr: SocketAddr) -> DaemonPktType2
-    {
-        DaemonPktType2::MutexLockReq(MutexLockReqPkt{name: name.to_string(), listener_addr})
-    }
-
-    pub fn send(&self, job: &str,  stream: &mut TcpStream) -> std::io::Result<()>
-    {
-        let pkt = bincode::serialize(self).unwrap();
-        let daemon_pkt = DaemonPkt{ job: job.to_string(),
-            pkt_type: DaemonPktType::MutexLockReqPkt, pkt};
-
-        let data = bincode::serialize(&daemon_pkt).unwrap();
-        stream.write(data.as_slice()).unwrap();
-        stream.flush().unwrap();
-
-        Ok(())
+        DaemonPktType::MutexLockReq(MutexLockReqPkt{name: name.to_string(), listener_addr})
     }
 }
 
@@ -218,25 +149,9 @@ pub struct MutexWriteAndReleasePkt
 
 impl MutexWriteAndReleasePkt
 {
-    pub fn new(mutex_name: &str, data: Vec<u8>) -> MutexWriteAndReleasePkt
+    pub fn new(mutex_name: &str, data: Vec<u8>) -> DaemonPktType
     {
-        MutexWriteAndReleasePkt{mutex_name: mutex_name.to_string(), data}
-    }
-
-    pub fn new2(mutex_name: &str, data: Vec<u8>) -> DaemonPktType2
-    {
-        DaemonPktType2::MutexWriteAndRelease(MutexWriteAndReleasePkt{mutex_name: mutex_name.to_string(), data})
-    }
-
-    pub fn send(&self, job: &str, stream: &mut TcpStream) -> std::io::Result<()>
-    {
-        let pkt = bincode::serialize(self).unwrap();
-        let daemon_pkt = DaemonPkt{job: job.to_string(),
-            pkt_type: DaemonPktType::MutexWriteAndReleasePkt, pkt};
-        let data = bincode::serialize(&daemon_pkt).unwrap();
-        stream.write(data.as_slice()).unwrap();
-        stream.flush().unwrap();
-        Ok(())
+        DaemonPktType::MutexWriteAndRelease(MutexWriteAndReleasePkt{mutex_name: mutex_name.to_string(), data})
     }
 }
 
@@ -249,27 +164,10 @@ pub struct BarrierPkt
 
 impl BarrierPkt
 {
-    pub fn new(id: u32, size: u32) -> BarrierPkt
+    pub fn new(id: u32, size: u32) -> DaemonPktType
     {
-        BarrierPkt {id, size}
+        DaemonPktType::Barrier(BarrierPkt {id, size})
     }
-    pub fn new2(id: u32, size: u32) -> DaemonPktType2
-    {
-        DaemonPktType2::Barrier(BarrierPkt {id, size})
-    }
-
-    pub fn send(&self, job: &str, stream: &mut TcpStream) -> std::io::Result<()>
-    {
-        let pkt = bincode::serialize(self).unwrap();
-        let daemon_pkt = DaemonPkt{job: job.to_string(),
-            pkt_type: DaemonPktType::BarrierPkt, pkt};
-        let data = bincode::serialize(&daemon_pkt).unwrap();
-        stream.write(data.as_slice()).unwrap();
-        stream.flush().unwrap();
-
-        Ok(())
-    }
-
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -309,26 +207,9 @@ pub struct FinalizePkt
 
 impl FinalizePkt
 {
-    pub fn new(id: u32, size: u32) -> FinalizePkt
+    pub fn new(id: u32, size: u32) -> DaemonPktType
     {
-        FinalizePkt {id, size}
-    }
-
-    pub fn new2(id: u32, size: u32) -> DaemonPktType2
-    {
-        DaemonPktType2::Finalize(FinalizePkt {id, size})
-    }
-
-    pub fn send(&self, job: &str, stream: &mut TcpStream) -> std::io::Result<()>
-    {
-        let pkt = bincode::serialize(self).unwrap();
-        let daemon_pkt = DaemonPkt{job: job.to_string(),
-            pkt_type: DaemonPktType::FinalizePkt, pkt};
-        let data = bincode::serialize(&daemon_pkt).unwrap();
-        stream.write(data.as_slice()).unwrap();
-        stream.flush().unwrap();
-
-        Ok(())
+        DaemonPktType::Finalize(FinalizePkt {id, size})
     }
 }
 

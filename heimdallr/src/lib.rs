@@ -146,8 +146,7 @@ impl HeimdallrClient
 
         let listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
         
-        // TODO WIP
-        let client_info = ClientInfoPkt::new2(&job, size, listener.local_addr().unwrap());
+        let client_info = ClientInfoPkt::new(&job, size, listener.local_addr().unwrap());
         client_info.send(&job, &mut stream);
 
         let daemon_reply = DaemonReplyPkt::receive(&stream);
@@ -371,7 +370,7 @@ impl HeimdallrClient
     pub fn barrier(&self) -> Result<(), &'static str>
     {
         // println!("barrier function entry");
-        let pkt = BarrierPkt::new2(self.id, self.size);
+        let pkt = BarrierPkt::new(self.id, self.size);
         let mut stream = TcpStream::connect(&self.daemon_addr).unwrap();
         pkt.send(&self.job, &mut stream);
         BarrierReplyPkt::receive(&stream);
@@ -395,7 +394,7 @@ impl Drop for HeimdallrClient
     {
         let mut stream = TcpStream::connect(self.daemon_addr).unwrap();
 
-        let finalize_pkt = FinalizePkt::new2(self.id, self.size);
+        let finalize_pkt = FinalizePkt::new(self.id, self.size);
         finalize_pkt.send(&self.job, &mut stream);
         stream.flush().unwrap();
         FinalizeReplyPkt::receive(&stream);
@@ -481,7 +480,7 @@ impl<'a, T> HeimdallrMutex<T>
     {
         // println!("mutex::new function entry");
         let ser_data = bincode::serialize(&start_value).unwrap();
-        let pkt = MutexCreationPkt::new2(name.clone(), client.id, ser_data);
+        let pkt = MutexCreationPkt::new(name.clone(), client.id, ser_data);
         let mut stream = TcpStream::connect(client.daemon_addr).unwrap();
         pkt.send(&client.job, &mut stream);
 
@@ -506,7 +505,7 @@ impl<'a, T> HeimdallrMutex<T>
         let ip = self.client_addr.ip();
         let op_listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
 
-        let lock_req_pkt = MutexLockReqPkt::new2(&self.name, op_listener.local_addr().unwrap());
+        let lock_req_pkt = MutexLockReqPkt::new(&self.name, op_listener.local_addr().unwrap());
         lock_req_pkt.send(&self.job, &mut stream);
 
 
@@ -523,7 +522,7 @@ impl<'a, T> HeimdallrMutex<T>
         let mut stream = TcpStream::connect(self.daemon_addr).unwrap();
 
         let ser_data = bincode::serialize(&self.data).unwrap();
-        let write_pkt = MutexWriteAndReleasePkt::new2(&self.name, ser_data);
+        let write_pkt = MutexWriteAndReleasePkt::new(&self.name, ser_data);
         write_pkt.send(&self.job, &mut stream);
         stream.flush().unwrap();
         // println!("push_data function exit");
