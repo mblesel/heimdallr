@@ -1,14 +1,11 @@
 pub mod networking;
 
 use std::process;
-use std::net::{TcpListener};
-use std::net::{SocketAddr, IpAddr};
+use std::net::{SocketAddr, IpAddr,TcpListener};
 use std::io::{Write, BufReader};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use std::fmt;
-use std::env;
-use std::thread;
+use std::{fmt, env, thread};
 use std::fs::File;
 use std::str::FromStr;
 
@@ -348,7 +345,7 @@ impl HeimdallrClient
     }
 
 
-    pub fn create_mutex<T>(&self, name: String, start_data: T) 
+    pub fn create_mutex<T>(&self, name: &str, start_data: T) 
         -> std::io::Result<HeimdallrMutex<T>>
         where T: Serialize
     {
@@ -463,12 +460,12 @@ pub struct HeimdallrMutex<T>
 impl<'a, T> HeimdallrMutex<T>
     where T: Serialize,
 {
-    pub fn new(client: &HeimdallrClient, name: String,  start_value: T) 
+    pub fn new(client: &HeimdallrClient, name: &str,  start_value: T) 
         -> std::io::Result<HeimdallrMutex<T>>
     {
         let ser_data = bincode::serialize(&start_value)
             .expect("Could not serialize Mutex's start value");
-        let pkt = MutexCreationPkt::new(name.clone(), client.id, ser_data, &client.job);
+        let pkt = MutexCreationPkt::new(name, client.id, ser_data, &client.job);
         let mut stream = networking::connect(&client.daemon_addr)?;
         pkt.send(&mut stream)?;
 
@@ -480,7 +477,7 @@ impl<'a, T> HeimdallrMutex<T>
             panic!("Error: miscommunication in mutex creation. Name mismatch")
         }
 
-        Ok(HeimdallrMutex::<T>{name, job: client.job.clone(), daemon_addr: client.daemon_addr,
+        Ok(HeimdallrMutex::<T>{name: name.to_string(), job: client.job.clone(), daemon_addr: client.daemon_addr,
             client_addr: client.listener.local_addr()?,data: start_value})
     }
 
@@ -564,9 +561,10 @@ pub struct DaemonConfig
 
 impl DaemonConfig
 {
-    pub fn new(name: String, partition: String, client_addr: SocketAddr, daemon_addr: SocketAddr)
+    pub fn new(name: &str, partition: &str, client_addr: SocketAddr, daemon_addr: SocketAddr)
         -> DaemonConfig
     {
-        DaemonConfig{name, partition, client_addr, daemon_addr}
+        DaemonConfig{name: name.to_string(), partition: partition.to_string(),
+            client_addr, daemon_addr}
     }
 }

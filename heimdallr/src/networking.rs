@@ -71,9 +71,9 @@ pub struct MutexCreationPkt
 
 impl MutexCreationPkt
 {
-    pub fn new(name: String, id: u32, serialized_data: Vec<u8>, job: &str) -> DaemonPkt
+    pub fn new(name: &str, id: u32, serialized_data: Vec<u8>, job: &str) -> DaemonPkt
     {
-        let pkt = DaemonPktType::MutexCreation(MutexCreationPkt{name, client_id: id, start_data: serialized_data});
+        let pkt = DaemonPktType::MutexCreation(MutexCreationPkt{name: name.to_string(), client_id: id, start_data: serialized_data});
         DaemonPkt{job: job.to_string(), pkt}
     }
 }

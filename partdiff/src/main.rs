@@ -593,7 +593,7 @@ let mut star: f64;
     let from = process_data.from;
     let chunk_size = process_data.chunk_size;
 
-    let mut global_maxresiduum = client.create_mutex::<f64>("maxresiduum".to_string(), 0.0)
+    let mut global_maxresiduum = client.create_mutex::<f64>("maxresiduum", 0.0)
         .unwrap();
 
 

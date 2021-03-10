@@ -165,7 +165,7 @@ fn _mutex_test() -> std::io::Result<()>
 {
     let client = HeimdallrClient::init(env::args()).unwrap();
 
-    let mut mutex = client.create_mutex("testmutex".to_string(), 0 as u64)?;
+    let mut mutex = client.create_mutex("testmutex", 0 as u64)?;
 
     {
         let mut m = mutex.lock().unwrap();
@@ -174,7 +174,7 @@ fn _mutex_test() -> std::io::Result<()>
         println!("after: {}", m.get());
     }
 
-    let mut mutex2 = client.create_mutex("testmutex2".to_string(), "".to_string())?;
+    let mut mutex2 = client.create_mutex("testmutex2", "".to_string())?;
 
     {
         let mut m = mutex2.lock().unwrap();
@@ -190,7 +190,7 @@ fn _mutex_test() -> std::io::Result<()>
 fn _mutex_test2() -> std::io::Result<()>
 {
     let client = HeimdallrClient::init(env::args()).unwrap();
-    let mut mutex = client.create_mutex("testmutex".to_string(), 0 as u64)?;
+    let mut mutex = client.create_mutex("testmutex", 0 as u64)?;
 
     for _ in 0..25000
     {

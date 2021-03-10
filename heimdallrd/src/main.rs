@@ -29,7 +29,7 @@ struct Daemon
 
 impl Daemon
 {
-    fn new(name: String, partition: String, interface: String) -> std::io::Result<Daemon>
+    fn new(name: &str, partition: &str, interface: &str) -> std::io::Result<Daemon>
     {
         // Get IP of this node
         let mut ip = match local_ipaddress::get()
@@ -64,8 +64,9 @@ impl Daemon
 
         let _connection_count: u64 = 0;
 
-        let daemon = Daemon{name, partition, client_addr, daemon_addr,
-                 client_listener, _daemon_listener, jobs, _connection_count};
+        let daemon = Daemon{name: name.to_string(), partition: partition.to_string(),
+                client_addr, daemon_addr, client_listener, _daemon_listener,
+                jobs, _connection_count};
 
         daemon.create_partition_file()?;
 
@@ -91,7 +92,7 @@ impl Daemon
             fs::create_dir_all(&path)?;
         }
 
-        let daemon_config = DaemonConfig::new(self.name.clone(), self.partition.clone(),
+        let daemon_config = DaemonConfig::new(&self.name, &self.partition,
                  self.client_addr.clone(), self.daemon_addr.clone());
 
         let file_path = format!("{}/{}", path, self.name);
@@ -116,7 +117,7 @@ impl Daemon
             DaemonPktType::ClientRegistration(client_reg) =>
             {
                 let job = self.jobs.entry(client_reg.job.clone())
-                    .or_insert(Job::new(client_reg.job, client_reg.size)
+                    .or_insert(Job::new(&client_reg.job, client_reg.size)
                     .expect("Error in Creating new job"));
 
                 job.clients.push(stream);
@@ -136,7 +137,7 @@ impl Daemon
             {
                 let job = self.jobs.get_mut(&pkt.job).expect("Error in finding correct job");
                 let mutex = job.mutexes.entry(mutex_pkt.name.clone())
-                    .or_insert(HeimdallrDaemonMutex::new(mutex_pkt.name.clone(), job.size, mutex_pkt.start_data.clone()));
+                    .or_insert(HeimdallrDaemonMutex::new(&mutex_pkt.name, job.size, mutex_pkt.start_data.clone()));
 
                 mutex.register_client(mutex_pkt.client_id, stream);
             },
@@ -199,14 +200,15 @@ struct Job
 
 impl Job
 {
-    fn new(name: String, size: u32) -> Result<Job, &'static str>
+    fn new(name: &str, size: u32) -> Result<Job, &'static str>
     {
         let clients = Vec::<TcpStream>::new();
         let client_listeners = Vec::<SocketAddr>::new();
         let mutexes = HashMap::<String, HeimdallrDaemonMutex>::new();
         let barrier = DaemonBarrier::new(size);
         let finalize = JobFinalization::new(size);
-        Ok(Job {name, size, clients, client_listeners, mutexes, barrier, finalize})
+        Ok(Job {name: name.to_string(), size, clients, client_listeners,
+            mutexes, barrier, finalize})
     }
 }
 
@@ -225,14 +227,14 @@ struct HeimdallrDaemonMutex
 //TODO destroy function
 impl HeimdallrDaemonMutex
 {
-    pub fn new(name: String, size: u32, start_data: Vec<u8>) -> HeimdallrDaemonMutex
+    pub fn new(name: &str, size: u32, start_data: Vec<u8>) -> HeimdallrDaemonMutex
     {
         let collective = CollectiveOperation::new(size);
         let data = start_data;
         let access_queue = VecDeque::<SocketAddr>::new();
         
-        HeimdallrDaemonMutex{name, constructed: false, collective, data, access_queue,
-            locked:false, current_owner: None}
+        HeimdallrDaemonMutex{name: name.to_string(), constructed: false, collective,
+            data, access_queue, locked:false, current_owner: None}
     }
 
     pub fn register_client(&mut self, id: u32, stream: TcpStream)
@@ -499,7 +501,7 @@ fn main()
         process::exit(1);
     });
             
-    let daemon = Daemon::new(name, partition, interface).unwrap_or_else(|err|
+    let daemon = Daemon::new(&name, &partition, &interface).unwrap_or_else(|err|
     {
         eprintln!("Error: Could not start daemon correctly: {} \n Shutting down.", err);
         process::exit(1);
