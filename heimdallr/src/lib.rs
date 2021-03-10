@@ -147,10 +147,9 @@ impl HeimdallrClient
         let listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
         
         let client_reg = ClientRegistrationPkt::new(&job, size, listener.local_addr().unwrap());
-        client_reg.send(&job, &mut stream);
+        client_reg.send(&mut stream);
 
-        let daemon_reply = DaemonReplyPkt::receive(&stream);
-
+        let daemon_reply = ClientRegistrationReplyPkt::receive(&stream).unwrap();
 
         let readers = Arc::new(Mutex::new(HashMap::<(u32,u32),SocketAddr>::new()));
         
@@ -176,10 +175,7 @@ impl HeimdallrClient
                 {
                     Ok(stream) =>
                     {
-                        let reader = BufReader::new(stream);
-                        let op_pkt: ClientOperationPkt = bincode::deserialize_from(reader).unwrap();
-                        // println!("METADATA RECEIVED");
-                        // println!("  PENDING:{}, {}", op_pkt.client_id, op_pkt.op_id);
+                        let op_pkt = ClientOperationPkt::receive(&stream);
                         let mut r = readers.lock().unwrap();
                         // TODO check that no such entry already exists and handle
                         // that case
@@ -197,54 +193,42 @@ impl HeimdallrClient
     pub fn send<T>(&self, data: &T, dest: u32, id: u32) -> Result<(), &'static str>
         where T: Serialize,
     {
-        // println!("send function entry");
         let mut stream = TcpStream::connect(self.client_listeners.get(dest as usize).unwrap()).unwrap();
 
         let ip = self.listener.local_addr().unwrap().ip();
         let op_listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
-        let op_pkt = ClientOperationPkt{client_id: self.id, op_id: id, addr: op_listener.local_addr().unwrap()};   
-        let op_msg = bincode::serialize(&op_pkt).unwrap();
-        stream.write(op_msg.as_slice()).unwrap();
-        stream.flush().unwrap();
-        // println!("  metadata sent");
+        let op_pkt = ClientOperationPkt::new(self.id, id, op_listener.local_addr().unwrap());   
+        op_pkt.send(&mut stream).unwrap();
 
         let (mut stream2, _) = op_listener.accept().unwrap();
         let msg = bincode::serialize(data).unwrap();
         stream2.write(msg.as_slice()).unwrap();
         stream.flush().unwrap();
         
-        // println!("send function exit");
         Ok(())
     }
 
     pub fn send_slice<T>(&self, data: &[T], dest: u32, id: u32) -> Result<(), &'static str>
         where T: Serialize,
     {
-        // println!("send function entry");
         let mut stream = TcpStream::connect(self.client_listeners.get(dest as usize).unwrap()).unwrap();
 
         let ip = self.listener.local_addr().unwrap().ip();
         let op_listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
-        let op_pkt = ClientOperationPkt{client_id: self.id, op_id: id, addr: op_listener.local_addr().unwrap()};   
-        let op_msg = bincode::serialize(&op_pkt).unwrap();
-        stream.write(op_msg.as_slice()).unwrap();
-        stream.flush().unwrap();
-        // println!("  metadata sent");
+        let op_pkt = ClientOperationPkt::new(self.id, id, op_listener.local_addr().unwrap());   
+        op_pkt.send(&mut stream).unwrap();
 
         let (mut stream2, _) = op_listener.accept().unwrap();
         let msg = bincode::serialize(data).unwrap();
         stream2.write(msg.as_slice()).unwrap();
         stream.flush().unwrap();
         
-        // println!("send function exit");
         Ok(())
     }
 
     pub fn receive<T>(&self, source: u32, id: u32) -> Result<T, &'static str>
         where T: serde::de::DeserializeOwned,
     {
-        // println!("receive function entry");
-        // println!(" LOOKING FOR: {}, {}", source, id);
         loop
         {
             let mut r = self.readers.lock().unwrap();
@@ -253,11 +237,9 @@ impl HeimdallrClient
             {
                 Some(a) =>
                 {
-                    // println!("  found metadata");
                     let stream = TcpStream::connect(a).unwrap();
                     let reader = BufReader::new(&stream);
                     let data: T = bincode::deserialize_from(reader).unwrap();
-                    // println!("receive function exit");
                     return Ok(data);
                 },
                 None => continue,
@@ -314,11 +296,9 @@ impl HeimdallrClient
             {
                 let mut stream = TcpStream::connect(&dest_addr).unwrap();
                 let op_listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
-                let op_pkt = ClientOperationPkt{client_id: self_id, op_id: id,
-                    addr: op_listener.local_addr().unwrap()};   
-                let op_msg = bincode::serialize(&op_pkt).unwrap();
-                stream.write(op_msg.as_slice()).unwrap();
-                stream.flush().unwrap();
+                let op_pkt = ClientOperationPkt::new(self_id, id,
+                    op_listener.local_addr().unwrap());   
+                op_pkt.send(&mut stream).unwrap();
 
                 let (mut stream2, _) = op_listener.accept().unwrap();
                 let msg = bincode::serialize(&data).unwrap();
@@ -369,12 +349,10 @@ impl HeimdallrClient
 
     pub fn barrier(&self) -> Result<(), &'static str>
     {
-        // println!("barrier function entry");
-        let pkt = BarrierPkt::new(self.id, self.size);
+        let pkt = BarrierPkt::new(self.id, self.size, &self.job);
         let mut stream = TcpStream::connect(&self.daemon_addr).unwrap();
-        pkt.send(&self.job, &mut stream);
-        BarrierReplyPkt::receive(&stream);
-        // println!("barrier function exit");
+        pkt.send(&mut stream);
+        BarrierReplyPkt::receive(&stream).unwrap();
         Ok(())
     }
 }
@@ -394,11 +372,10 @@ impl Drop for HeimdallrClient
     {
         let mut stream = TcpStream::connect(self.daemon_addr).unwrap();
 
-        let finalize_pkt = FinalizePkt::new(self.id, self.size);
-        finalize_pkt.send(&self.job, &mut stream);
+        let finalize_pkt = FinalizePkt::new(self.id, self.size, &self.job);
+        finalize_pkt.send(&mut stream);
         stream.flush().unwrap();
-        FinalizeReplyPkt::receive(&stream);
-        // println!("Client finalized");
+        FinalizeReplyPkt::receive(&stream).unwrap();
     }
 }
 
@@ -478,13 +455,12 @@ impl<'a, T> HeimdallrMutex<T>
 {
     pub fn new(client: &HeimdallrClient, name: String,  start_value: T) -> HeimdallrMutex<T>
     {
-        // println!("mutex::new function entry");
         let ser_data = bincode::serialize(&start_value).unwrap();
-        let pkt = MutexCreationPkt::new(name.clone(), client.id, ser_data);
+        let pkt = MutexCreationPkt::new(name.clone(), client.id, ser_data, &client.job);
         let mut stream = TcpStream::connect(client.daemon_addr).unwrap();
-        pkt.send(&client.job, &mut stream);
+        pkt.send(&mut stream);
 
-        let reply = MutexCreationReplyPkt::receive(&stream);
+        let reply = MutexCreationReplyPkt::receive(&stream).unwrap();
 
         //TODO
         if reply.name != name
@@ -492,7 +468,6 @@ impl<'a, T> HeimdallrMutex<T>
             eprintln!("Error: miscommunication in mutex creation. Name mismatch");
         }
 
-        // println!("mutex::new function exit");
         HeimdallrMutex::<T>{name, job: client.job.clone(), daemon_addr: client.daemon_addr,
             client_addr: client.listener.local_addr().unwrap(),data: start_value}
     }
@@ -500,32 +475,28 @@ impl<'a, T> HeimdallrMutex<T>
     pub fn lock(&'a mut self) -> std::io::Result<HeimdallrMutexDataHandle::<'a,T>>
         where T: serde::de::DeserializeOwned,
     {
-        // println!("lock function entry");
         let mut stream = TcpStream::connect(self.daemon_addr)?;
         let ip = self.client_addr.ip();
         let op_listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
 
-        let lock_req_pkt = MutexLockReqPkt::new(&self.name, op_listener.local_addr().unwrap());
-        lock_req_pkt.send(&self.job, &mut stream);
+        let lock_req_pkt = MutexLockReqPkt::new(&self.name, op_listener.local_addr().unwrap(),&self.job);
+        lock_req_pkt.send(&mut stream);
 
 
         let (stream2, _) = op_listener.accept().unwrap();
         self.data = bincode::deserialize_from(stream2).unwrap();
 
-        // println!("lock function exit");
         Ok(HeimdallrMutexDataHandle::<T>::new(self))
     }
 
     fn push_data(&self) 
     {
-        // println!("push_data function entry");
         let mut stream = TcpStream::connect(self.daemon_addr).unwrap();
 
         let ser_data = bincode::serialize(&self.data).unwrap();
-        let write_pkt = MutexWriteAndReleasePkt::new(&self.name, ser_data);
-        write_pkt.send(&self.job, &mut stream);
+        let write_pkt = MutexWriteAndReleasePkt::new(&self.name, ser_data, &self.job);
+        write_pkt.send(&mut stream);
         stream.flush().unwrap();
-        // println!("push_data function exit");
     }
 }
 

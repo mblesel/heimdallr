@@ -53,7 +53,6 @@ impl Daemon
             }
         }
 
-
         let client_addr = SocketAddr::new(ip, 4664);
         let client_listener = TcpListener::bind(client_addr)?;
 
@@ -108,7 +107,7 @@ impl Daemon
         self.connection_count += 1;
         println!("CONNECTION COUNT: {}", self.connection_count);
 
-        let pkt: DaemonPkt = bincode::deserialize_from(&stream).unwrap();
+        let pkt = DaemonPkt::receive(&stream);
 
         match pkt.pkt
         {
@@ -123,11 +122,11 @@ impl Daemon
                 if job.clients.len() as u32 == (job.size)
                 {
                     println!("  All {} clients for job: {} have been found.", job.size, job.name);
-                    for (idx, stream) in job.clients.iter().enumerate()
+                    for (idx, stream) in job.clients.iter_mut().enumerate()
                     {
                         println!("    {} : {}", idx, stream.peer_addr().unwrap());
-                        let reply = DaemonReplyPkt::new(idx as u32, &job.client_listeners);
-                        reply.send(&stream);
+                        let reply = ClientRegistrationReplyPkt::new(idx as u32, &job.client_listeners);
+                        reply.send(stream).unwrap();
                     }
                 }
             },
@@ -465,9 +464,19 @@ fn parse_args(mut args: std::env::Args) -> Result<(String, String, String), &'st
             _ => return Err("Unknown argument error."),
         };
     }
-
     Ok((name, partition, interface))
 }
+
+// struct CollectiveOperation
+// {
+//     size: u32,
+//     clients: Vec<Option<TcpStream>>,
+//     ready : bool,
+// }
+//
+// impl CollectiveOperation
+// {
+// }
 
 
 fn main() 
