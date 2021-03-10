@@ -112,13 +112,13 @@ impl Daemon
 
         match pkt.pkt
         {
-            DaemonPktType::ClientInfo(client_info) =>
+            DaemonPktType::ClientRegistration(client_reg) =>
             {
-                let job = self.jobs.entry(client_info.job.clone())
-                    .or_insert(Job::new(client_info.job, client_info.size).unwrap());
+                let job = self.jobs.entry(client_reg.job.clone())
+                    .or_insert(Job::new(client_reg.job, client_reg.size).unwrap());
 
                 job.clients.push(stream);
-                job.client_listeners.push(client_info.listener_addr);
+                job.client_listeners.push(client_reg.listener_addr);
 
                 if job.clients.len() as u32 == (job.size)
                 {

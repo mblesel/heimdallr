@@ -3,22 +3,19 @@ use std::io::{Write};
 use serde::{Serialize, Deserialize};
 
 
+//
+// Client to Daemon packets
+//
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum DaemonPktType
 {
-    ClientInfo(ClientInfoPkt),
+    ClientRegistration(ClientRegistrationPkt),
     MutexCreation(MutexCreationPkt),
     MutexLockReq(MutexLockReqPkt),
     MutexWriteAndRelease(MutexWriteAndReleasePkt),
     Barrier(BarrierPkt),
     Finalize(FinalizePkt),
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DaemonPkt
-{
-    pub job: String,
-    pub pkt: DaemonPktType,
 }
 
 impl DaemonPktType
@@ -34,48 +31,26 @@ impl DaemonPktType
 
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ClientInfoPkt
+pub struct DaemonPkt
+{
+    pub job: String,
+    pub pkt: DaemonPktType,
+}
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ClientRegistrationPkt
 {
     pub job: String,
     pub size: u32,
     pub listener_addr: SocketAddr,
 }
 
-impl ClientInfoPkt
+impl ClientRegistrationPkt
 {
     pub fn new(job: &str, size: u32, listener_addr: SocketAddr) -> DaemonPktType
     {
-        DaemonPktType::ClientInfo(ClientInfoPkt{job: job.to_string(), size, listener_addr})
-    }
-}
-
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DaemonReplyPkt
-{
-    pub id: u32,
-    pub client_listeners: Vec<SocketAddr>,
-}
-
-impl DaemonReplyPkt
-{
-    pub fn new(id: u32, client_listeners: &Vec<SocketAddr>) -> DaemonReplyPkt
-    {
-        DaemonReplyPkt {id, client_listeners: client_listeners.to_vec()}
-    }
-
-    pub fn send(&self, mut stream: &TcpStream)
-    {
-        let msg = bincode::serialize(self).unwrap();
-        stream.write(msg.as_slice()).unwrap();
-        stream.flush().unwrap();
-    }
-
-    pub fn receive(stream: &TcpStream) -> DaemonReplyPkt
-    {
-        let daemon_reply: DaemonReplyPkt = bincode::deserialize_from(stream).unwrap();
-
-        daemon_reply
+        DaemonPktType::ClientRegistration(ClientRegistrationPkt{job: job.to_string(), size, listener_addr})
     }
 }
 
@@ -93,33 +68,6 @@ impl MutexCreationPkt
     pub fn new(name: String, id: u32, serialized_data: Vec<u8>) -> DaemonPktType
     {
         DaemonPktType::MutexCreation(MutexCreationPkt{name, client_id: id, start_data: serialized_data})
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct MutexCreationReplyPkt
-{
-    pub name: String,
-}
-
-impl MutexCreationReplyPkt
-{
-    pub fn new(name: &str) -> MutexCreationReplyPkt
-    {
-        MutexCreationReplyPkt{name: name.to_string()}
-    }
-
-    pub fn send(self, stream: &mut TcpStream) -> std::io::Result<()>
-    {
-        let pkt = bincode::serialize(&self).unwrap();
-        stream.write(pkt.as_slice()).unwrap();
-        stream.flush().unwrap();
-        Ok(())
-    }
-
-    pub fn receive(stream: &TcpStream) -> MutexCreationReplyPkt
-    {
-        bincode::deserialize_from(stream).unwrap()
     }
 }
 
@@ -170,6 +118,83 @@ impl BarrierPkt
     }
 }
 
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FinalizePkt
+{
+    pub id: u32,
+    pub size: u32
+}
+
+impl FinalizePkt
+{
+    pub fn new(id: u32, size: u32) -> DaemonPktType
+    {
+        DaemonPktType::Finalize(FinalizePkt {id, size})
+    }
+}
+
+
+//
+// Daemon to Client packets
+//
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DaemonReplyPkt
+{
+    pub id: u32,
+    pub client_listeners: Vec<SocketAddr>,
+}
+
+impl DaemonReplyPkt
+{
+    pub fn new(id: u32, client_listeners: &Vec<SocketAddr>) -> DaemonReplyPkt
+    {
+        DaemonReplyPkt {id, client_listeners: client_listeners.to_vec()}
+    }
+
+    pub fn send(&self, mut stream: &TcpStream)
+    {
+        let msg = bincode::serialize(self).unwrap();
+        stream.write(msg.as_slice()).unwrap();
+        stream.flush().unwrap();
+    }
+
+    pub fn receive(stream: &TcpStream) -> DaemonReplyPkt
+    {
+        bincode::deserialize_from(stream).unwrap()
+    }
+}
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MutexCreationReplyPkt
+{
+    pub name: String,
+}
+
+impl MutexCreationReplyPkt
+{
+    pub fn new(name: &str) -> MutexCreationReplyPkt
+    {
+        MutexCreationReplyPkt{name: name.to_string()}
+    }
+
+    pub fn send(self, stream: &mut TcpStream) -> std::io::Result<()>
+    {
+        let pkt = bincode::serialize(&self).unwrap();
+        stream.write(pkt.as_slice()).unwrap();
+        stream.flush().unwrap();
+        Ok(())
+    }
+
+    pub fn receive(stream: &TcpStream) -> MutexCreationReplyPkt
+    {
+        bincode::deserialize_from(stream).unwrap()
+    }
+}
+
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BarrierReplyPkt
 {
@@ -199,21 +224,6 @@ impl BarrierReplyPkt
 
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct FinalizePkt
-{
-    pub id: u32,
-    pub size: u32
-}
-
-impl FinalizePkt
-{
-    pub fn new(id: u32, size: u32) -> DaemonPktType
-    {
-        DaemonPktType::Finalize(FinalizePkt {id, size})
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub struct FinalizeReplyPkt
 {
     pub id: u32,
@@ -241,6 +251,9 @@ impl FinalizeReplyPkt
 }
 
 
+//
+// Client to Client packets
+//
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ClientOperationPkt

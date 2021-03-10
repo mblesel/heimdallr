@@ -146,8 +146,8 @@ impl HeimdallrClient
 
         let listener = TcpListener::bind(format!("{}:0", ip)).unwrap();
         
-        let client_info = ClientInfoPkt::new(&job, size, listener.local_addr().unwrap());
-        client_info.send(&job, &mut stream);
+        let client_reg = ClientRegistrationPkt::new(&job, size, listener.local_addr().unwrap());
+        client_reg.send(&job, &mut stream);
 
         let daemon_reply = DaemonReplyPkt::receive(&stream);
 
