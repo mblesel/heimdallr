@@ -1,4 +1,4 @@
-use std::net::{SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpStream, TcpListener, ToSocketAddrs};
 use std::io::{Write};
 use serde::{Serialize, Deserialize};
 
@@ -20,16 +20,17 @@ pub enum DaemonPktType
 
 impl DaemonPkt
 {
-    pub fn send(self, stream: &mut TcpStream)
+    pub fn send(self, stream: &mut TcpStream) -> std::io::Result<()>
     {
-        let msg = bincode::serialize(&self).unwrap();
-        stream.write(msg.as_slice()).unwrap();
-        stream.flush().unwrap();
+        let msg = bincode::serialize(&self).expect("Could not serialize DaemonPkt");
+        stream.write(msg.as_slice())?;
+        stream.flush()?;
+        Ok(())
     }
 
     pub fn receive(stream: &TcpStream) -> DaemonPkt
     {
-        bincode::deserialize_from(stream).unwrap()
+        bincode::deserialize_from(stream).expect("Could not deserialize DaemonPkt")
     }
 }
 
@@ -49,7 +50,6 @@ pub struct ClientRegistrationPkt
     pub size: u32,
     pub listener_addr: SocketAddr,
 }
-
 impl ClientRegistrationPkt
 {
     pub fn new(job: &str, size: u32, listener_addr: SocketAddr) -> DaemonPkt
@@ -163,7 +163,7 @@ impl DaemonReplyPkt
 {
     pub fn send(self, stream: &mut TcpStream) -> std::io::Result<()>
     {
-        let msg = bincode::serialize(&self).unwrap();
+        let msg = bincode::serialize(&self).expect("Could not serialize DaemonReplyPkt");
         stream.write(msg.as_slice())?;
         stream.flush()?;
         Ok(())
@@ -171,7 +171,7 @@ impl DaemonReplyPkt
 
     pub fn receive(stream: &TcpStream) -> Self
     {
-        bincode::deserialize_from(stream).unwrap()
+        bincode::deserialize_from(stream).expect("Could not deserialize DaemonReplyPkt")
     }
 }
 
@@ -298,7 +298,7 @@ impl ClientOperationPkt
 
     pub fn send(self, stream: &mut TcpStream) -> std::io::Result<()>
     {
-        let msg = bincode::serialize(&self).unwrap();
+        let msg = bincode::serialize(&self).expect("Could not serialize ClientOperationPkt");
         stream.write(msg.as_slice())?;
         stream.flush()?;
         Ok(())
@@ -306,6 +306,22 @@ impl ClientOperationPkt
 
     pub fn receive(stream: &TcpStream) -> Self
     {
-        bincode::deserialize_from(stream).unwrap()
+        bincode::deserialize_from(stream).expect("Could not deserialize ClientOperationPkt")
     }
+}
+
+
+//
+// General networking functions
+//
+
+pub fn connect(addr: &SocketAddr) -> std::io::Result<TcpStream>
+{
+    TcpStream::connect(addr)
+}
+
+
+pub fn bind_listener<A: ToSocketAddrs>(ip: &A) -> std::io::Result<TcpListener>
+{
+    TcpListener::bind(ip)
 }

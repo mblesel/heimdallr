@@ -23,7 +23,7 @@ struct Daemon
     client_listener: TcpListener,
     _daemon_listener: TcpListener,
     jobs: HashMap<String, Job>,
-    connection_count: u64,
+    _connection_count: u64,
 }
 
 
@@ -55,17 +55,17 @@ impl Daemon
         }
 
         let client_addr = SocketAddr::new(ip, 4664);
-        let client_listener = TcpListener::bind(client_addr)?;
+        let client_listener = heimdallr::networking::bind_listener(&client_addr)?;
 
         let daemon_addr = SocketAddr::new(ip, 4665);
-        let _daemon_listener = TcpListener::bind(daemon_addr)?;
+        let _daemon_listener = heimdallr::networking::bind_listener(&daemon_addr)?;
 
         let jobs = HashMap::<String, Job>::new();
 
-        let connection_count: u64 = 0;
+        let _connection_count: u64 = 0;
 
         let daemon = Daemon{name, partition, client_addr, daemon_addr,
-                 client_listener, _daemon_listener, jobs, connection_count};
+                 client_listener, _daemon_listener, jobs, _connection_count};
 
         daemon.create_partition_file()?;
 
@@ -80,7 +80,7 @@ impl Daemon
             Err(_) => 
             {
                 eprintln!("XDG_CONFIG_HOME is not set. Falling back to default path: ~/.config");
-                let home = env::var("HOME").unwrap();
+                let home = env::var("HOME").expect("HOME environment variable is not set");
                 format!("{}/.config", home)
             },
         };
@@ -95,8 +95,9 @@ impl Daemon
                  self.client_addr.clone(), self.daemon_addr.clone());
 
         let file_path = format!("{}/{}", path, self.name);
-        let serialzed = serde_json::to_string(&daemon_config).unwrap();
-        fs::write(&file_path, serialzed)?;
+        let serialized = serde_json::to_string(&daemon_config)
+            .expect("Could not serialize DaemonConfig");
+        fs::write(&file_path, serialized)?;
         println!("Writing heimdallr daemon config to: {}", file_path);
 
         Ok(())
@@ -115,7 +116,8 @@ impl Daemon
             DaemonPktType::ClientRegistration(client_reg) =>
             {
                 let job = self.jobs.entry(client_reg.job.clone())
-                    .or_insert(Job::new(client_reg.job, client_reg.size).unwrap());
+                    .or_insert(Job::new(client_reg.job, client_reg.size)
+                    .expect("Error in Creating new job"));
 
                 job.clients.push(stream);
                 job.client_listeners.push(client_reg.listener_addr);
@@ -125,15 +127,14 @@ impl Daemon
                     println!("  All {} clients for job: {} have been found.", job.size, job.name);
                     for (idx, stream) in job.clients.iter_mut().enumerate()
                     {
-                        // println!("    {} : {}", idx, stream.peer_addr().unwrap());
                         let reply = ClientRegistrationReplyPkt::new(idx as u32, &job.client_listeners);
-                        reply.send(stream).unwrap();
+                        reply.send(stream)?;
                     }
                 }
             },
             DaemonPktType::MutexCreation(mutex_pkt) =>
             {
-                let job = self.jobs.get_mut(&pkt.job).unwrap();
+                let job = self.jobs.get_mut(&pkt.job).expect("Error in finding correct job");
                 let mutex = job.mutexes.entry(mutex_pkt.name.clone())
                     .or_insert(HeimdallrDaemonMutex::new(mutex_pkt.name.clone(), job.size, mutex_pkt.start_data.clone()));
 
@@ -141,7 +142,7 @@ impl Daemon
             },
             DaemonPktType::MutexLockReq(lock_req_pkt) =>
             {
-                let job = self.jobs.get_mut(&pkt.job).unwrap();
+                let job = self.jobs.get_mut(&pkt.job).expect("Error in finding correct job");
                 let mutex = job.mutexes.get_mut(&lock_req_pkt.name);
 
                 match mutex
@@ -152,7 +153,7 @@ impl Daemon
             },
             DaemonPktType::MutexWriteAndRelease(write_pkt) =>
             {
-                let job = self.jobs.get_mut(&pkt.job).unwrap();
+                let job = self.jobs.get_mut(&pkt.job).expect("Error in finding correct job");
                 let mutex = job.mutexes.get_mut(&write_pkt.mutex_name);
 
                 match mutex
@@ -167,18 +168,14 @@ impl Daemon
             },
             DaemonPktType::Barrier(barrier_pkt) =>
             {
-                // println!("received barrier pkt from client {}", barrier_pkt.id);
-
-                let job = self.jobs.get_mut(&pkt.job).unwrap();
+                let job = self.jobs.get_mut(&pkt.job).expect("Error in finding correct job");
                 let barrier = &mut job.barrier;
 
                 barrier.register_client(barrier_pkt.id, stream);
             },
             DaemonPktType::Finalize(fini_pkt) =>
             {
-                // println!("received finalize pkt from client {}", fini_pkt.id);
-
-                let job = self.jobs.get_mut(&pkt.job).unwrap();
+                let job = self.jobs.get_mut(&pkt.job).expect("Error in finding correct job");
                 let fini = &mut job.finalize;
 
                 fini.register_client(fini_pkt.id, stream);
@@ -218,7 +215,6 @@ struct HeimdallrDaemonMutex
 {
     name: String,
     constructed: bool,
-    // clients: Vec::<TcpStream>,
     collective: CollectiveOperation,
     data: Vec<u8>,
     access_queue: VecDeque::<SocketAddr>,
@@ -255,7 +251,7 @@ impl HeimdallrDaemonMutex
                     Some(s) =>
                     {
                         let reply = MutexCreationReplyPkt::new(&self.name);
-                        reply.send(s).unwrap();
+                        reply.send(s).expect("Could not send MutexCreationReplyPkt");
                     },
                     None => eprintln!("Error: Found None in Mutex client streams"),
                 }
@@ -266,15 +262,12 @@ impl HeimdallrDaemonMutex
 
     pub fn access_request(&mut self, addr: SocketAddr)
     {
-        // println!("access_request function entry");
         self.access_queue.push_back(addr);
         self.grant_next_lock();
-        // println!("access_request function exit");
     }
 
     pub fn release_request(&mut self)
     {
-        // println!("release_request function entry");
         if self.locked
         {
             self.locked = false;
@@ -285,22 +278,18 @@ impl HeimdallrDaemonMutex
         {
             eprintln!("Error: Release request on Mutex that was not locked");
         }
-        // println!("release_request function exit");
     }
 
     fn send_data(&mut self) -> Result<(), &'static str>
     {
-        // println!("send_data function entry");
         match self.current_owner
         {
             Some(addr) =>
             {
-                // println!("  Sending mutex data: {:?}", self.data);
-                let mut stream = TcpStream::connect(addr).unwrap();
+                let mut stream = heimdallr::networking::connect(&addr).unwrap();
                 stream.write(self.data.as_slice()).unwrap();
                 stream.flush().unwrap();
                 stream.shutdown(std::net::Shutdown::Both).unwrap();
-                // println!("send_data function exit");
                 Ok(())
             },
             None => Err("Error: Mutex has no current valid owner to send data to"),
@@ -309,15 +298,12 @@ impl HeimdallrDaemonMutex
 
     fn grant_next_lock(&mut self)
     {
-        // println!("grant_next_lock function entry");
         if (!self.locked) & (!self.access_queue.is_empty())
         {
             self.current_owner = self.access_queue.pop_front();
             self.locked = true;
-            // println!("Ownership of mutex given");
-            self.send_data().unwrap();
+            self.send_data().expect("Could not send mutex data to client");
         }
-        // println!("grant_next_lock function exit");
     }
 }
 
@@ -352,13 +338,12 @@ impl DaemonBarrier
                     Some(s) =>
                     {
                         let reply = BarrierReplyPkt::new(self.size);
-                        reply.send(s).unwrap();
+                        reply.send(s).expect("Could not send BarrierReplyPkt");
                     },
                     None => eprintln!("Error: Found None in Barrier client streams"),
                 }
             }
             self.collective = CollectiveOperation::new(self.size);
-            // println!("Barrier has completed");
         }
     }
 }
@@ -393,7 +378,7 @@ impl JobFinalization
                     Some(s) =>
                     {
                         let reply = FinalizeReplyPkt::new(self.size);
-                        reply.send(s).unwrap();
+                        reply.send(s).expect("Could not send FinalizeReplyPkt");
                     },
                     None => eprintln!("Error: Found None in Finalization client streams"),
                 }
@@ -416,7 +401,8 @@ fn run(mut daemon: Daemon) -> Result<(), &'static str>
         {
             Ok(stream) =>
             {
-                daemon.handle_client_connection(stream).unwrap();
+                daemon.handle_client_connection(stream)
+                    .expect("Error in handling of client connection");
             },
             Err(e) =>
             {
@@ -508,23 +494,23 @@ impl CollectiveOperation
 fn main() 
 {
     let (name, partition, interface) = parse_args(env::args()).unwrap_or_else(|err|
-        {
-            eprintln!("Error: Problem parsing arguments: {}", err);
-            process::exit(1);
-        });
+    {
+        eprintln!("Error: Problem parsing arguments: {}", err);
+        process::exit(1);
+    });
             
     let daemon = Daemon::new(name, partition, interface).unwrap_or_else(|err|
-        {
-            eprintln!("Error: Could not start daemon correctly: {} \n Shutting down.", err);
-            process::exit(1);
-        });
+    {
+        eprintln!("Error: Could not start daemon correctly: {} \n Shutting down.", err);
+        process::exit(1);
+    });
 
     println!("Daemon running under name: {} and address: {}", daemon.name, daemon.client_addr);
 
     run(daemon).unwrap_or_else(|err|
-        {
-            eprintln!("Error in running daemon: {}", err);
-        });
+    {
+        eprintln!("Error in running daemon: {}", err);
+    });
 
 
     println!("Daemon shutting down.");

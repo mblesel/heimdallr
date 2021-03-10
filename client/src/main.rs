@@ -94,7 +94,7 @@ fn _nb_test() -> std::io::Result<()>
             println!("send_nb call done");
             let s = String::from("test");
             client.send(&s, 1, 1).unwrap();
-            buf = a_send.data();
+            buf = a_send.data()?;
             println!("got data buffer ownership back");
             println!("{}", buf[4664]);
         },
@@ -106,7 +106,7 @@ fn _nb_test() -> std::io::Result<()>
             println!("receive_nb call done");
             let s: String = client.receive(0,1).unwrap();
             println!("{}",s);
-            buf = a_recv.data();
+            buf = a_recv.data()?;
             println!("got buf data ownership");
             println!("{}", buf[4664]);
         },
@@ -165,7 +165,7 @@ fn _mutex_test() -> std::io::Result<()>
 {
     let client = HeimdallrClient::init(env::args()).unwrap();
 
-    let mut mutex = client.create_mutex("testmutex".to_string(), 0 as u64);
+    let mut mutex = client.create_mutex("testmutex".to_string(), 0 as u64)?;
 
     {
         let mut m = mutex.lock().unwrap();
@@ -174,7 +174,7 @@ fn _mutex_test() -> std::io::Result<()>
         println!("after: {}", m.get());
     }
 
-    let mut mutex2 = client.create_mutex("testmutex2".to_string(), "".to_string());
+    let mut mutex2 = client.create_mutex("testmutex2".to_string(), "".to_string())?;
 
     {
         let mut m = mutex2.lock().unwrap();
@@ -190,7 +190,7 @@ fn _mutex_test() -> std::io::Result<()>
 fn _mutex_test2() -> std::io::Result<()>
 {
     let client = HeimdallrClient::init(env::args()).unwrap();
-    let mut mutex = client.create_mutex("testmutex".to_string(), 0 as u64);
+    let mut mutex = client.create_mutex("testmutex".to_string(), 0 as u64)?;
 
     for _ in 0..25000
     {
