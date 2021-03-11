@@ -318,7 +318,8 @@ fn main() -> std::io::Result<()>
 {
     // _mutex_test2()?;   
     // _barrier_test()?;
-    _send_slice()?;
+    // _send_slice()?;
+    _nb_test()?;
     Ok(())
 }
 

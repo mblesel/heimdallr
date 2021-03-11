@@ -107,7 +107,7 @@ impl Daemon
     fn handle_client_connection(&mut self, stream: TcpStream) -> std::io::Result<()>
     {
         // println!("New client connected from: {}", stream.peer_addr()?);
-        // self.connection_count += 1;
+        self._connection_count += 1;
         // println!("CONNECTION COUNT: {}", self.connection_count);
 
         let pkt = DaemonPkt::receive(&stream);
@@ -180,6 +180,14 @@ impl Daemon
                 let fini = &mut job.finalize;
 
                 fini.register_client(fini_pkt.id, stream);
+
+                if fini.finished
+                {
+                    self.jobs.remove(&pkt.job);
+                    println!("Job '{}' has finished", pkt.job);
+                    println!("Current connection count: {}", self._connection_count);
+                    process::exit(0);
+                }
             },
         }
         Ok(())
@@ -354,6 +362,7 @@ struct JobFinalization
 {
     size: u32,
     collective: CollectiveOperation,
+    finished: bool
 }
 
 impl JobFinalization
@@ -361,7 +370,7 @@ impl JobFinalization
     pub fn new(size: u32) -> JobFinalization
     {
         let collective = CollectiveOperation::new(size);
-        JobFinalization {size, collective}
+        JobFinalization {size, collective, finished: false}
     }
 
     pub fn register_client(&mut self, id: u32, stream: TcpStream)
@@ -385,8 +394,8 @@ impl JobFinalization
                     None => eprintln!("Error: Found None in Finalization client streams"),
                 }
             }
-            println!("Job finalization done. Exiting Daemon");
-            process::exit(0);
+            self.finished = true;
+            // process::exit(0);
         }
     }
 }

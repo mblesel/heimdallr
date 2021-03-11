@@ -411,46 +411,6 @@ impl<T> NbDataHandle<T>
 }
 
 
-pub struct NbSend<T>
-{
-    t: thread::JoinHandle<T>
-}
-
-impl<T> NbSend<T>
-{
-    pub fn new(t: thread::JoinHandle<T>) -> NbSend<T>
-    {
-        NbSend::<T>{t}
-    }
-
-    pub fn data(self) -> T
-    {
-        let data = self.t.join().expect("Error in joining thread of NbSend");
-        data
-    }
-}
-
-
-pub struct NbReceive<T>
-{
-    t: thread::JoinHandle<T>,
-}
-
-impl<T> NbReceive<T>
-{
-    pub fn new(t: thread::JoinHandle<T>) -> NbReceive<T>
-    {
-        NbReceive::<T>{t}
-    }
-
-    pub fn data(self) -> T
-    {
-        let data = self.t.join().expect("Error in joining thread of NbReceive");
-        data
-    }
-}
-
-
 pub struct HeimdallrMutex<T>
 {
     name: String,
