@@ -1,5 +1,5 @@
 use std::net::{SocketAddr, TcpStream, TcpListener, ToSocketAddrs};
-use std::io::{Write};
+use std::io::{Write, BufReader};
 use serde::{Serialize, Deserialize};
 
 
@@ -30,7 +30,8 @@ impl DaemonPkt
 
     pub fn receive(stream: &TcpStream) -> DaemonPkt
     {
-        bincode::deserialize_from(stream).expect("Could not deserialize DaemonPkt")
+        let reader = BufReader::new(stream);
+        bincode::deserialize_from(reader).expect("Could not deserialize DaemonPkt")
     }
 }
 
@@ -171,7 +172,8 @@ impl DaemonReplyPkt
 
     pub fn receive(stream: &TcpStream) -> Self
     {
-        bincode::deserialize_from(stream).expect("Could not deserialize DaemonReplyPkt")
+        let reader = BufReader::new(stream);
+        bincode::deserialize_from(reader).expect("Could not deserialize DaemonReplyPkt")
     }
 }
 
@@ -306,7 +308,8 @@ impl ClientOperationPkt
 
     pub fn receive(stream: &TcpStream) -> Self
     {
-        bincode::deserialize_from(stream).expect("Could not deserialize ClientOperationPkt")
+        let reader = BufReader::new(stream);
+        bincode::deserialize_from(reader).expect("Could not deserialize ClientOperationPkt")
     }
 }
 

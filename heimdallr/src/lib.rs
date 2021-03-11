@@ -240,7 +240,8 @@ impl HeimdallrClient
                 Some(a) =>
                 {
                     let stream = networking::connect(&a)?;
-                    let data: T = bincode::deserialize_from(&stream)
+                    let reader = BufReader::new(&stream);
+                    let data: T = bincode::deserialize_from(reader)
                         .expect("Could not deserialize received data");
                     return Ok(data);
                 },
@@ -275,7 +276,8 @@ impl HeimdallrClient
                         Some(a) =>
                         {
                             let stream = networking::connect(&a)?;
-                            let data: T = bincode::deserialize_from(&stream)
+                            let reader = BufReader::new(&stream);
+                            let data: T = bincode::deserialize_from(reader)
                                 .expect("Could not deserialize data in receive_any_source");
                             return Ok(data);
                         },
@@ -332,7 +334,8 @@ impl HeimdallrClient
                         Some(a) =>
                         {
                             let stream = networking::connect(&a)?;
-                            let data: T = bincode::deserialize_from(&stream)
+                            let reader = BufReader::new(&stream);
+                            let data: T = bincode::deserialize_from(reader)
                                 .expect("Could not deserialize received data in receive_nb");
                             return Ok(data);
                         },
@@ -493,7 +496,8 @@ impl<'a, T> HeimdallrMutex<T>
 
 
         let (stream2, _) = op_listener.accept()?;
-        self.data = bincode::deserialize_from(stream2)
+        let reader = BufReader::new(&stream2);
+        self.data = bincode::deserialize_from(reader)
             .expect("Could not deserialize mutex data");
 
         Ok(HeimdallrMutexDataHandle::<T>::new(self))
