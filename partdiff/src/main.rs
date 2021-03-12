@@ -550,7 +550,7 @@ fn calculate(arguments: &mut CalculationArguments, results: &mut CalculationResu
 
 
 // Main calculation
-fn calculate_jacobi_heimdallr(client: &HeimdallrClient, mut arguments: CalculationArguments,
+fn calculate_jacobi_heimdallr(client: &mut HeimdallrClient, mut arguments: CalculationArguments,
     results: &mut CalculationResults, options: &CalculationOptions,
     process_data: &ProcessData) 
     -> CalculationArguments
@@ -857,7 +857,7 @@ fn display_matrix_heimdallr(client: &HeimdallrClient, arguments: &mut Calculatio
 
 fn main()
 {
-    let client = HeimdallrClient::init(env::args()).unwrap();
+    let mut client = HeimdallrClient::init(env::args()).unwrap();
 
     let options = ask_params(&client.cmd_args);
     let (mut arguments, mut results, process_data) = init_variables(&client, &options);
@@ -881,7 +881,7 @@ fn main()
         println!("Executing with {} clients", client.size);
         init_matrices_heimdallr(&client, &mut arguments, &options, &process_data);
         let now = Instant::now();
-        arguments = calculate_jacobi_heimdallr(&client, arguments, &mut results, &options,
+        arguments = calculate_jacobi_heimdallr(&mut client, arguments, &mut results, &options,
             &process_data);
         let duration = now.elapsed();
 

@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use std::net::{TcpStream, TcpListener, SocketAddr, IpAddr};
 use std::io::Write;
 use std::path::Path;
-use std::{env, fs};
+use std::{env, fs, thread};
 use std::str::FromStr;
 use std::collections::VecDeque;
+use std::sync::{Mutex, Arc, Barrier};
 
 use local_ipaddress;
 use pnet::datalink;
@@ -401,28 +402,42 @@ impl JobFinalization
 }
 
 
-
-
-fn run(mut daemon: Daemon) -> Result<(), &'static str>
+struct CollectiveOperation
 {
-    println!("Listening for new client connections.");
-    for stream in daemon.client_listener.try_clone().unwrap().incoming()
+    clients: Vec<Option<TcpStream>>,
+    ready : bool,
+}
+
+impl CollectiveOperation
+{
+    pub fn new(size: u32) -> Self
     {
-        match stream
+        let mut clients = Vec::<Option<TcpStream>>::new();
+        clients.resize_with(size as usize, || None);
+        Self {clients, ready: false}
+    }
+
+    pub fn register_client(&mut self, id: u32, stream: TcpStream) -> bool
+    {
+        match self.clients[id as usize]
         {
-            Ok(stream) =>
+            Some(_) => return false,
+            None => 
             {
-                daemon.handle_client_connection(stream)
-                    .expect("Error in handling of client connection");
+                self.clients[id as usize] = Some(stream);
+                self.ready = self.is_ready();
+                return true;
             },
-            Err(e) =>
-            {
-                eprintln!("Error in daemon listening to incoming connections: {}", e);
-            }
         }
     }
-    Ok(())
+
+    fn is_ready(&self) -> bool
+    {
+        !self.clients.iter().any(|x| x.is_none())
+    }
 }
+
+
 
 fn parse_args(mut args: std::env::Args) -> Result<(String, String, String), &'static str>
 {
@@ -466,39 +481,26 @@ fn parse_args(mut args: std::env::Args) -> Result<(String, String, String), &'st
     Ok((name, partition, interface))
 }
 
-struct CollectiveOperation
-{
-    clients: Vec<Option<TcpStream>>,
-    ready : bool,
-}
 
-impl CollectiveOperation
+fn run(mut daemon: Daemon) -> Result<(), &'static str>
 {
-    pub fn new(size: u32) -> Self
+    println!("Listening for new client connections.");
+    for stream in daemon.client_listener.try_clone().unwrap().incoming()
     {
-        let mut clients = Vec::<Option<TcpStream>>::new();
-        clients.resize_with(size as usize, || None);
-        Self {clients, ready: false}
-    }
-
-    pub fn register_client(&mut self, id: u32, stream: TcpStream) -> bool
-    {
-        match self.clients[id as usize]
+        match stream
         {
-            Some(_) => return false,
-            None => 
+            Ok(stream) =>
             {
-                self.clients[id as usize] = Some(stream);
-                self.ready = self.is_ready();
-                return true;
+                daemon.handle_client_connection(stream)
+                    .expect("Error in handling of client connection");
             },
+            Err(e) =>
+            {
+                eprintln!("Error in daemon listening to incoming connections: {}", e);
+            }
         }
     }
-
-    fn is_ready(&self) -> bool
-    {
-        !self.clients.iter().any(|x| x.is_none())
-    }
+    Ok(())
 }
 
 
@@ -510,15 +512,15 @@ fn main()
         process::exit(1);
     });
             
-    let daemon = Daemon::new(&name, &partition, &interface).unwrap_or_else(|err|
+    let daemon = Daemon2::new(&name, &partition, &interface).unwrap_or_else(|err|
     {
         eprintln!("Error: Could not start daemon correctly: {} \n Shutting down.", err);
         process::exit(1);
     });
 
-    println!("Daemon running under name: {} and address: {}", daemon.name, daemon.client_addr);
+    println!("Daemon running under name: {} and address: {}", daemon.name, daemon.client_listener_addr);
 
-    run(daemon).unwrap_or_else(|err|
+    run2(daemon).unwrap_or_else(|err|
     {
         eprintln!("Error in running daemon: {}", err);
     });
@@ -526,3 +528,305 @@ fn main()
 
     println!("Daemon shutting down.");
 }
+
+
+
+struct Daemon2
+{
+    name: String,
+    partition: String,
+    client_listener_addr: SocketAddr,
+    client_listener: TcpListener,
+}
+
+impl Daemon2
+{
+    fn new(name: &str, partition: &str, interface: &str) -> std::io::Result<Daemon2>
+    {
+        // Get IP of this node
+        let mut ip = match local_ipaddress::get()
+        {
+            Some(i) => IpAddr::from_str(&i).unwrap(),
+            None => IpAddr::from_str("0.0.0.0").unwrap(),
+        };
+
+        // Use the manually specified network interface
+        if !interface.is_empty()
+        {
+            let interfaces = datalink::interfaces();
+            for i in interfaces
+            {
+                if i.name == interface
+                {
+                    println!("Using specified network interface {} with ip {}",
+                        i.name, i.ips[0]);
+                    ip = i.ips[0].ip();
+
+                }
+            }
+        }
+
+        let client_listener_addr = SocketAddr::new(ip, 4664);
+
+        let client_listener = heimdallr::networking::bind_listener(&client_listener_addr)?;
+
+        let daemon = Daemon2{name: name.to_string(), partition: partition.to_string(),
+            client_listener_addr, client_listener};
+
+        daemon.create_partition_file().unwrap();
+        
+        Ok(daemon)
+    }
+
+    fn create_partition_file(&self) -> std::io::Result<()>
+    {
+        let config_home = match env::var("XDG_CONFIG_HOME")
+        {
+            Ok(path) => path,
+            Err(_) => 
+            {
+                eprintln!("XDG_CONFIG_HOME is not set. Falling back to default path: ~/.config");
+                let home = env::var("HOME").expect("HOME environment variable is not set");
+                format!("{}/.config", home)
+            },
+        };
+
+        let path = format!("{}/heimdallr/{}", config_home, &self.partition);
+        if Path::new(&path).exists() == false
+        {
+            fs::create_dir_all(&path)?;
+        }
+
+        let daemon_config = DaemonConfig::new(&self.name, &self.partition,
+                 self.client_listener_addr.clone(), self.client_listener_addr.clone());
+
+        let file_path = format!("{}/{}", path, self.name);
+        let serialized = serde_json::to_string(&daemon_config)
+            .expect("Could not serialize DaemonConfig");
+        fs::write(&file_path, serialized)?;
+        println!("Writing heimdallr daemon config to: {}", file_path);
+
+        Ok(())
+    }
+}
+
+fn run2(mut daemon: Daemon2) -> std::io::Result<()>
+{   
+    let mut job_name = "".to_string();
+    let mut job_size = 0;
+    let mut clients = Vec::<TcpStream>::new();
+    let mut client_listeners = Vec::<SocketAddr>::new();
+
+    for stream in daemon.client_listener.incoming()
+    {
+        match stream
+        {
+            Ok(stream) =>
+            {
+                let pkt = DaemonPkt::receive(&stream);
+
+                match pkt.pkt
+                {
+                    DaemonPktType::ClientRegistration(client_reg) =>
+                    {
+                        println!("Received ClientRegistrationPkt: {:?}", client_reg);
+                        
+                        if job_name.is_empty()
+                        {
+                            job_name = client_reg.job.clone();
+                            job_size = client_reg.size;
+                        }
+                        
+                        clients.push(stream);
+                        client_listeners.push(client_reg.listener_addr);
+                    }
+                    _ => eprintln!("Unknown Packet type"),
+                }
+            },
+            Err(e) =>
+            {
+                eprintln!("Error in daemon listening to incoming connections: {}", e);
+            },
+        }
+
+
+        if clients.len() as u32 == job_size
+        {
+            println!("All clients for job have connected");
+            let job_arc = Arc::new(Job2::new(&job_name, job_size).unwrap());
+            let mut job_threads = Vec::<thread::JoinHandle<()>>::new();
+            let thread_barrier = Arc::new(Barrier::new(job_size as usize));
+            
+            for id in 0..clients.len()
+            {
+                let mut stream = clients.remove(0);
+                let job = Arc::clone(&job_arc);
+                let b = Arc::clone(&thread_barrier);
+                
+                let reply = ClientRegistrationReplyPkt::new(id as u32, &client_listeners);
+                reply.send(&mut stream)?;
+
+
+                let t = thread::spawn(move||
+                {
+                    println!("thread spawned for job: {}", job.name);
+
+                    loop
+                    {
+                        let pkt = DaemonPkt::receive(&stream);
+                        println!("Received DaemonPkt: {:?}", pkt);
+
+                        match pkt.pkt
+                        {
+                            DaemonPktType::Barrier(barrier_pkt) =>
+                            {
+                                let mut barrier = job.barrier.lock().unwrap();
+                                barrier.register_client(barrier_pkt.id, stream.try_clone().unwrap());
+
+                                drop(barrier);
+                                b.wait();
+                                let barrier = job.barrier.lock().unwrap();
+                                if barrier.finished
+                                {
+                                    let reply = BarrierReplyPkt::new(job.size);
+                                    reply.send(&mut stream).expect("Could not send BarrierReplyPkt");
+                                }
+                                else
+                                {
+                                    eprintln!("Expected all client to have participated in barrier already")
+                                }
+                                drop(barrier);
+
+                                let b_res = b.wait();
+                                if b_res.is_leader()
+                                {
+                                    let mut barrier = job.barrier.lock().unwrap();
+                                    barrier.reset();
+                                }
+                            },
+                            //TODO Maybe use RwLock instead of mutex
+                            DaemonPktType::Finalize(finalize_pkt) =>
+                            {
+                                // TODO Cleanup
+                                let mut fini = job.finalize.lock().unwrap();
+                                fini.register_client(finalize_pkt.id, stream.try_clone().unwrap());
+                                drop(fini);
+                                b.wait();
+                                let fini = job.finalize.lock().unwrap();
+                                if fini.finished
+                                {
+                                    let reply = FinalizeReplyPkt::new(job.size);
+                                    reply.send(&mut stream).expect("Could not send FinalizeReplyPkt");
+                                }
+                                else
+                                {
+                                    eprintln!("Expected to have already received all FinalizePkts")
+                                }
+                                drop(fini);
+                                b.wait();
+                                return ()
+                            },
+                            _ => (),
+                        }
+                    }
+                });
+
+                job_threads.push(t);
+            }
+
+            for t in job_threads
+            {
+                t.join().unwrap();
+                println!("All job threads joined");
+                process::exit(0);
+            }
+        }
+
+    }
+
+    Ok(())
+}
+
+struct Job2
+{
+    name: String,
+    size: u32,
+    barrier: Mutex<DaemonBarrier2>,
+    finalize: Mutex<JobFinalization2>,
+}
+
+impl Job2
+{
+    fn new(name: &str, size: u32) -> std::io::Result<Job2>
+    {
+        // let clients = Vec::<TcpStream>::new();
+        // let client_listeners = Vec::<SocketAddr>::new();
+        // let mutexes = HashMap::<String, HeimdallrDaemonMutex>::new();
+        let barrier = Mutex::new(DaemonBarrier2::new(size));
+        let finalize = Mutex::new(JobFinalization2::new(size));
+        // Ok(Job {name: name.to_string(), size, clients, client_listeners,
+        //     mutexes, barrier, finalize})
+        Ok(Job2{name: name.to_string(), size, barrier, finalize})
+    }
+}
+
+
+struct JobFinalization2
+{
+    size: u32,
+    streams: Vec<Option<TcpStream>>,
+    finished: bool,
+}
+
+impl JobFinalization2 
+{
+    fn new(size: u32) -> Self
+    {
+        let mut streams = Vec::<Option<TcpStream>>::new();
+        streams.resize_with(size as usize, || None);
+
+        Self {size, streams, finished: false}
+    }
+
+    fn register_client(&mut self, id: u32, stream: TcpStream)
+    {
+        self.streams[id as usize] = Some(stream);
+        self.finished = !self.streams.iter().any(|x| x.is_none());
+    }
+}
+
+struct DaemonBarrier2
+{
+    size: u32,
+    streams: Vec<Option<TcpStream>>,
+    finished: bool,
+}
+
+impl DaemonBarrier2
+{
+    fn new(size: u32) -> Self
+    {
+        let mut streams = Vec::<Option<TcpStream>>::new();
+        streams.resize_with(size as usize, || None);
+
+        Self {size, streams, finished: false}
+    }
+
+    fn register_client(&mut self, id: u32, stream: TcpStream)
+    {
+        self.streams[id as usize] = Some(stream);
+        self.finished = !self.streams.iter().any(|x| x.is_none());
+    }
+
+    fn reset(&mut self)
+    {
+        self.streams = Vec::<Option<TcpStream>>::new();
+        self.streams.resize_with(self.size as usize, || None);
+        self.finished = false;
+    }
+}
+
+// fn handle_client_connection()
+
+
+

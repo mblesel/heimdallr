@@ -5,7 +5,7 @@ use std::time::Instant;
 
 fn main()
 {
-    let client = HeimdallrClient::init(env::args()).unwrap();
+    let mut client = HeimdallrClient::init(env::args()).unwrap();
 
     let buff_size: u32 = client.cmd_args[0].parse().unwrap();
     let iterations: u32 = client.cmd_args[1].parse().unwrap();

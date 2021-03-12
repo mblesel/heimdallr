@@ -234,7 +234,7 @@ fn _receive_any_source_test() -> std::io::Result<()>
 
 fn _barrier_test() -> std::io::Result<()>
 {
-    let client = HeimdallrClient::init(env::args()).unwrap();
+    let mut client = HeimdallrClient::init(env::args()).unwrap();
 
     match client.id
     {
@@ -317,9 +317,11 @@ fn _send_slice() -> std::io::Result<()>
 fn main() -> std::io::Result<()>
 {
     // _mutex_test2()?;   
-    // _barrier_test()?;
+    _barrier_test()?;
     // _send_slice()?;
-    _nb_test()?;
+    // _nb_test()?;
+    // _client_test_1()?;
+    // _cluster_test()?;
     Ok(())
 }
 

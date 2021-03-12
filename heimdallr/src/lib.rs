@@ -1,7 +1,7 @@
 pub mod networking;
 
 use std::process;
-use std::net::{SocketAddr, IpAddr,TcpListener};
+use std::net::{SocketAddr, IpAddr,TcpListener, TcpStream};
 use std::io::{Write, BufReader};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
@@ -25,7 +25,8 @@ pub struct HeimdallrClient
     pub client_listeners: Vec<SocketAddr>,
     daemon_addr: SocketAddr,
     readers: Arc<Mutex<HashMap<(u32,u32),SocketAddr>>>,
-    pub cmd_args: Vec<String>
+    pub cmd_args: Vec<String>,
+    daemon_stream: TcpStream,
 }
 
 impl HeimdallrClient
@@ -154,7 +155,7 @@ impl HeimdallrClient
         
         let client = HeimdallrClient {job, size, id:reply.id,
             listener, client_listeners: reply.client_listeners,
-            daemon_addr: daemon_config.client_addr, readers, cmd_args};
+            daemon_addr: daemon_config.client_addr, readers, cmd_args, daemon_stream: stream};
 
         // Start listener handler thread that handles incoming connections from other clients
         client.listener_handler();
@@ -205,7 +206,7 @@ impl HeimdallrClient
         let (mut stream2, _) = op_listener.accept()?;
         let msg = bincode::serialize(data).expect("Error in serializing data");
         stream2.write(msg.as_slice())?;
-        stream.flush()?;
+        stream2.flush()?;
         
         Ok(())
     }
@@ -223,7 +224,7 @@ impl HeimdallrClient
         let (mut stream2, _) = op_listener.accept()?;
         let msg = bincode::serialize(data).expect("Could not serialize send_slice data");
         stream2.write(msg.as_slice())?;
-        stream.flush()?;
+        stream2.flush()?;
         
         Ok(())
     }
@@ -356,12 +357,11 @@ impl HeimdallrClient
     }
 
 
-    pub fn barrier(&self) -> std::io::Result<()>
+    pub fn barrier(&mut self) -> std::io::Result<()>
     {
         let pkt = BarrierPkt::new(self.id, self.size, &self.job);
-        let mut stream = networking::connect(&self.daemon_addr)?;
-        pkt.send(&mut stream)?;
-        BarrierReplyPkt::receive(&stream).expect("Could not receive BarrierReplyPkt");
+        pkt.send(&mut self.daemon_stream)?;
+        BarrierReplyPkt::receive(&self.daemon_stream).expect("Could not receive BarrierReplyPkt");
         Ok(())
     }
 }
@@ -379,13 +379,13 @@ impl Drop for HeimdallrClient
 {
     fn drop(&mut self)
     {
-        let mut stream = networking::connect(&self.daemon_addr)
-            .expect("Could not connect to daemin in finalization procedure of HeimdallrClient");
+        // let mut stream = networking::connect(&self.daemon_addr)
+        //     .expect("Could not connect to daemin in finalization procedure of HeimdallrClient");
 
         let finalize_pkt = FinalizePkt::new(self.id, self.size, &self.job);
-        finalize_pkt.send(&mut stream).expect("Could not send FinalizePkt");
-        stream.flush().expect("Error in flushing stream");
-        FinalizeReplyPkt::receive(&stream).expect("Could not receive FinalizeReplyPkt");
+        finalize_pkt.send(&mut self.daemon_stream).expect("Could not send FinalizePkt");
+        self.daemon_stream.flush().expect("Error in flushing stream");
+        FinalizeReplyPkt::receive(&self.daemon_stream).expect("Could not receive FinalizeReplyPkt");
     }
 }
 
