@@ -30,8 +30,11 @@ impl DaemonPkt
 
     pub fn receive(stream: &TcpStream) -> DaemonPkt
     {
-        let reader = BufReader::new(stream);
-        bincode::deserialize_from(reader).expect("Could not deserialize DaemonPkt")
+        // TODO see if Bufreader can be used here without loosing data when client
+        // sends two packages successively with the daemon not already being at this
+        // receive call
+        // let reader = BufReader::new(stream);
+        bincode::deserialize_from(stream).expect("Could not deserialize DaemonPkt")
     }
 }
 
@@ -84,14 +87,14 @@ impl MutexCreationPkt
 pub struct MutexLockReqPkt
 {
     pub name: String,
-    pub listener_addr: SocketAddr,
+    pub id: u32,
 }
 
 impl MutexLockReqPkt
 {
-    pub fn new(name: &str,listener_addr: SocketAddr, job: &str) -> DaemonPkt
+    pub fn new(name: &str,client_id: u32, job: &str) -> DaemonPkt
     {
-        let pkt = DaemonPktType::MutexLockReq(MutexLockReqPkt{name: name.to_string(), listener_addr});
+        let pkt = DaemonPktType::MutexLockReq(MutexLockReqPkt{name: name.to_string(), id: client_id});
         DaemonPkt{job: job.to_string(), pkt}
     }
 }

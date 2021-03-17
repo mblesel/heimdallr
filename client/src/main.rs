@@ -1,5 +1,6 @@
 // use std::net::{Ipv4Addr, SocketAddrV4};
 use std::env;
+use std::time::Instant;
 
 use heimdallr::HeimdallrClient;
 
@@ -163,7 +164,7 @@ fn _gather_test() -> std::io::Result<()>
 
 fn _mutex_test() -> std::io::Result<()>
 {
-    let client = HeimdallrClient::init(env::args()).unwrap();
+    let mut client = HeimdallrClient::init(env::args()).unwrap();
 
     let mut mutex = client.create_mutex("testmutex", 0 as u64)?;
 
@@ -189,7 +190,7 @@ fn _mutex_test() -> std::io::Result<()>
 
 fn _mutex_test2() -> std::io::Result<()>
 {
-    let client = HeimdallrClient::init(env::args()).unwrap();
+    let mut client = HeimdallrClient::init(env::args()).unwrap();
     let mut mutex = client.create_mutex("testmutex", 0 as u64)?;
 
     for _ in 0..25000
@@ -312,16 +313,54 @@ fn _send_slice() -> std::io::Result<()>
     Ok(())
 }
 
+fn _barrier_benchmark() -> std::io::Result<()>
+{
+    let mut client = HeimdallrClient::init(env::args()).unwrap();
+    
+    let now = Instant::now();
+    for i in 0..10000
+    {
+        println!("{}", i);
+        client.barrier()?;
+    }
+    let duration = now.elapsed();
+    println!("Total runtime: {:.6}", duration.as_secs_f64());
+    Ok(())
+}
+
+fn _mutex_benchmark() -> std::io::Result<()>
+{
+    let mut client = HeimdallrClient::init(env::args()).unwrap();
+    let mut mutex = client.create_mutex("testmutex", 0 as u64)?;
+
+    let now = Instant::now();
+    for i in 0..25000
+    {
+        println!("{}",i);
+        let mut m = mutex.lock()?;
+        m.set(m.get()+1);
+    }
+    let m = mutex.lock()?;
+    println!("MUtex: {}", m.get());
+
+    let duration = now.elapsed();
+    println!("Total runtime: {:.6}", duration.as_secs_f64());
+
+
+    Ok(())
+}
 
 
 fn main() -> std::io::Result<()>
 {
-    // _mutex_test2()?;   
-    _barrier_test()?;
+    // _mutex_test()?;   
+    // _barrier_test()?;
     // _send_slice()?;
     // _nb_test()?;
     // _client_test_1()?;
     // _cluster_test()?;
+    // _barrier_benchmark()?;
+    _mutex_benchmark()?;
     Ok(())
 }
 

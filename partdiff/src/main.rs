@@ -5,9 +5,7 @@ use std::env;
 use std::vec;
 
 use heimdallr::HeimdallrClient;
-
-// The supported calculation Algorithms
-// Gauss Seidel working on the same matrix
+// The supported calculation Algorithms Gauss Seidel working on the same matrix
 // Jacobi using in and out matrices
 #[derive(Debug, PartialEq)]
 enum CalculationMethod
@@ -599,7 +597,7 @@ let mut star: f64;
 
     while term_iteration > 0
     {
-        // println!("Iteration: {}", results.stat_iteration);
+        println!("Iteration: {}", results.stat_iteration);
         maxresiduum = 0.0;
 
         if options.termination == TerminationCondition::TermPrec

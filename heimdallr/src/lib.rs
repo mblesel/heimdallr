@@ -23,7 +23,6 @@ pub struct HeimdallrClient
     pub id: u32,
     pub listener: TcpListener,
     pub client_listeners: Vec<SocketAddr>,
-    daemon_addr: SocketAddr,
     readers: Arc<Mutex<HashMap<(u32,u32),SocketAddr>>>,
     pub cmd_args: Vec<String>,
     daemon_stream: TcpStream,
@@ -155,7 +154,7 @@ impl HeimdallrClient
         
         let client = HeimdallrClient {job, size, id:reply.id,
             listener, client_listeners: reply.client_listeners,
-            daemon_addr: daemon_config.client_addr, readers, cmd_args, daemon_stream: stream};
+            readers, cmd_args, daemon_stream: stream};
 
         // Start listener handler thread that handles incoming connections from other clients
         client.listener_handler();
@@ -318,6 +317,7 @@ impl HeimdallrClient
         Ok(NbDataHandle::<std::io::Result<T>>::new(t))
     }
 
+
     pub fn receive_nb<T>(&self, source: u32, id: u32) 
         -> std::io::Result<NbDataHandle<std::io::Result<T>>>
         where T: serde::de::DeserializeOwned + std::marker::Send + 'static,
@@ -349,11 +349,11 @@ impl HeimdallrClient
     }
 
 
-    pub fn create_mutex<T>(&self, name: &str, start_data: T) 
+    pub fn create_mutex<T>(&mut self, name: &str, start_data: T) 
         -> std::io::Result<HeimdallrMutex<T>>
         where T: Serialize
     {
-        Ok(HeimdallrMutex::<T>::new(&self, name, start_data)?)
+        Ok(HeimdallrMutex::<T>::new(self, name, start_data)?)
     }
 
 
@@ -415,24 +415,24 @@ pub struct HeimdallrMutex<T>
 {
     name: String,
     job: String,
-    daemon_addr: SocketAddr,
-    client_addr: SocketAddr,
+    daemon_stream: TcpStream,
+    client_id: u32,
     data: T,
 }
 
 impl<'a, T> HeimdallrMutex<T>
     where T: Serialize,
 {
-    pub fn new(client: &HeimdallrClient, name: &str,  start_value: T) 
+    pub fn new(client: &mut HeimdallrClient, name: &str,  start_value: T) 
         -> std::io::Result<HeimdallrMutex<T>>
     {
         let ser_data = bincode::serialize(&start_value)
             .expect("Could not serialize Mutex's start value");
         let pkt = MutexCreationPkt::new(name, client.id, ser_data, &client.job);
-        let mut stream = networking::connect(&client.daemon_addr)?;
-        pkt.send(&mut stream)?;
+        // let mut stream = networking::connect(&client.daemon_addr)?;
+        pkt.send(&mut client.daemon_stream)?;
 
-        let reply = MutexCreationReplyPkt::receive(&stream)
+        let reply = MutexCreationReplyPkt::receive(&client.daemon_stream)
             .expect("Could not receive MutexCreationReplyPkt");
 
         if reply.name != name
@@ -440,38 +440,40 @@ impl<'a, T> HeimdallrMutex<T>
             panic!("Error: miscommunication in mutex creation. Name mismatch")
         }
 
-        Ok(HeimdallrMutex::<T>{name: name.to_string(), job: client.job.clone(), daemon_addr: client.daemon_addr,
-            client_addr: client.listener.local_addr()?,data: start_value})
+        Ok(HeimdallrMutex::<T>{name: name.to_string(), job: client.job.clone(),
+            daemon_stream: client.daemon_stream.try_clone().unwrap(), 
+            client_id: client.id,
+            data: start_value})
     }
 
     pub fn lock(&'a mut self) -> std::io::Result<HeimdallrMutexDataHandle::<'a,T>>
         where T: serde::de::DeserializeOwned,
     {
-        let mut stream = networking::connect(&self.daemon_addr)?;
-        let ip = self.client_addr.ip();
-        let op_listener = networking::bind_listener(&format!("{}:0", ip))?;
+        // TODO remove return socketaddr from packet
+        // let mut stream = networking::connect(&self.daemon_addr)?;
+        // let ip = self.client_addr.ip();
+        // let op_listener = networking::bind_listener(&format!("{}:0", ip))?;
 
-        let lock_req_pkt = MutexLockReqPkt::new(&self.name, op_listener.local_addr()?,&self.job);
-        lock_req_pkt.send(&mut stream)?;
+        let lock_req_pkt = MutexLockReqPkt::new(&self.name, self.client_id,&self.job);
+        lock_req_pkt.send(&mut self.daemon_stream)?;
 
 
-        let (stream2, _) = op_listener.accept()?;
-        let reader = BufReader::new(&stream2);
+        // let (stream2, _) = op_listener.accept()?;
+        let reader = BufReader::new(&self.daemon_stream);
         self.data = bincode::deserialize_from(reader)
             .expect("Could not deserialize mutex data");
 
         Ok(HeimdallrMutexDataHandle::<T>::new(self))
     }
 
-    fn push_data(&self) -> std::io::Result<()> 
+    fn push_data(&mut self) -> std::io::Result<()> 
     {
-        let mut stream = networking::connect(&self.daemon_addr)?;
-
+        // let mut stream = networking::connect(&self.daemon_addr)?;
         let ser_data = bincode::serialize(&self.data)
             .expect("Could not serialize Mutex data");
         let write_pkt = MutexWriteAndReleasePkt::new(&self.name, ser_data, &self.job);
-        write_pkt.send(&mut stream)?;
-        stream.flush()?;
+        write_pkt.send(&mut self.daemon_stream)?;
+        self.daemon_stream.flush()?;
         Ok(())
     }
 }
