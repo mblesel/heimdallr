@@ -350,6 +350,35 @@ fn _mutex_benchmark() -> std::io::Result<()>
     Ok(())
 }
 
+fn _nb_paper_example() -> std::io::Result<()>
+{
+    let client = HeimdallrClient::init(env::args()).unwrap();
+    let mut buf = vec![42.0;10];
+    let mut nb = None;
+
+    if client.id == 0
+    {
+        nb = Some(client.send_nb(buf, 1, 0).unwrap());
+    }
+    else if client.id == 1
+    {
+        buf = client.receive(0,0).unwrap();
+    }
+
+    if client.id == 0
+    {
+        buf = nb.unwrap().data().unwrap();
+        println!("buffer: {:?}", buf);
+    }
+    else if client.id == 1
+    {
+        // THIS DOES NOT COMPILE!
+        // println!("buffer: {:?}", buf); 
+    }
+
+    Ok(())
+}
+
 
 fn main() -> std::io::Result<()>
 {
@@ -360,7 +389,8 @@ fn main() -> std::io::Result<()>
     // _client_test_1()?;
     // _cluster_test()?;
     // _barrier_benchmark()?;
-    _mutex_benchmark()?;
+    // _mutex_benchmark()?;
+    _nb_paper_example()?;
     Ok(())
 }
 
